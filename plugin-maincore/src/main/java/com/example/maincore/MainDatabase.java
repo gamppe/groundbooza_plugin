@@ -28,6 +28,38 @@ public class MainDatabase {
      * nothing on its own; only the owner on record can ever use it to claim land. */
     public record PendingDeed(int id, UUID owner, String name, boolean reservation) {}
 
+    /** A player's chosen job plus their level (0..UpgradeTrack.MAX_LEVEL) on each of the job's
+     * three upgrade tracks. */
+    public record JobProfile(Job job, int u1, int u2, int u3) {
+        public int level(int track) {
+            return switch (track) {
+                case 0 -> u1;
+                case 1 -> u2;
+                case 2 -> u3;
+                default -> 0;
+            };
+        }
+
+        public JobProfile withLevel(int track, int level) {
+            return switch (track) {
+                case 0 -> new JobProfile(job, level, u2, u3);
+                case 1 -> new JobProfile(job, u1, level, u3);
+                case 2 -> new JobProfile(job, u1, u2, level);
+                default -> this;
+            };
+        }
+
+        /** Every upgrade bought across all tracks - what the rank title is based on. */
+        public int total() {
+            return u1 + u2 + u3;
+        }
+
+        /** Level of the track that's baked into the job's tool item (ToolLevel). */
+        public int itemLevel() {
+            return level(job.itemTrack());
+        }
+    }
+
     public enum MarketCategory { LAND, ITEM }
 
     public enum MarketStatus { ACTIVE, SOLD, EXPIRED }
@@ -96,11 +128,69 @@ public class MainDatabase {
                     + "is_reservation BOOLEAN NOT NULL DEFAULT FALSE,"
                     + "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
                     + ")");
+            stmt.execute("CREATE TABLE IF NOT EXISTS jobs ("
+                    + "uuid VARCHAR(36) PRIMARY KEY,"
+                    + "job VARCHAR(16) NOT NULL,"
+                    + "upgrade_level INT NOT NULL DEFAULT 0,"
+                    + "chosen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                    + ")");
         } catch (SQLException e) {
             logger.log(Level.SEVERE, "Failed to create MainCore tables", e);
         }
         migrateStatusColumn();
         migrateReservationColumns();
+        migrateJobTracks();
+        migrateReservationName();
+    }
+
+    // jobs originally had one upgrade_level; now each job has three tracks. The old value maps
+    // onto whichever track the job's tool item follows (explosion for 광부, track 1 elsewhere).
+    private void migrateJobTracks() {
+        boolean fresh = !columnExists("jobs", "upgrade_1");
+        addColumnIfMissing("jobs", "upgrade_1", "INT NOT NULL DEFAULT 0");
+        addColumnIfMissing("jobs", "upgrade_2", "INT NOT NULL DEFAULT 0");
+        addColumnIfMissing("jobs", "upgrade_3", "INT NOT NULL DEFAULT 0");
+        if (!fresh) {
+            return;
+        }
+        try (Connection conn = dataSource.getConnection();
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("UPDATE jobs SET upgrade_2 = upgrade_level WHERE job = 'MINER'");
+            stmt.execute("UPDATE jobs SET upgrade_1 = upgrade_level WHERE job <> 'MINER'");
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Failed to migrate jobs.upgrade_level into tracks", e);
+        }
+    }
+
+    // 토지선점권 lands used to be named "무허가"; the fixed name is now ReservationDeedItem.FIXED_NAME.
+    private void migrateReservationName() {
+        String sql = "UPDATE lands SET name = ? WHERE is_reservation = TRUE AND name = '무허가'";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, ReservationDeedItem.FIXED_NAME);
+            int changed = stmt.executeUpdate();
+            if (changed > 0) {
+                logger.info("Renamed " + changed + " reservation land(s) to " + ReservationDeedItem.FIXED_NAME + ".");
+            }
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Failed to rename reservation lands", e);
+        }
+    }
+
+    private boolean columnExists(String table, String column) {
+        String checkSql = "SELECT COUNT(*) AS c FROM information_schema.columns "
+                + "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement check = conn.prepareStatement(checkSql)) {
+            check.setString(1, table);
+            check.setString(2, column);
+            try (ResultSet rs = check.executeQuery()) {
+                return rs.next() && rs.getInt("c") > 0;
+            }
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Failed to check column " + table + "." + column, e);
+            return true; // safest assumption: don't run a data migration on top of unknown state
+        }
     }
 
     // lands existed before 토지선점권 (reservation deed) support was added - migrate it in place.
@@ -231,6 +321,20 @@ public class MainDatabase {
             return stmt.executeUpdate() == 1;
         } catch (SQLException e) {
             logger.log(Level.SEVERE, "Failed to delete listing " + id, e);
+            return false;
+        }
+    }
+
+    /** Blocking. Seller's early withdrawal: only removes the row while it's still ACTIVE, so it
+     * can't yank a listing a buyer has just atomically marked SOLD. */
+    public boolean deleteActiveListing(int id) {
+        String sql = "DELETE FROM market_listings WHERE id = ? AND status = 'ACTIVE'";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, id);
+            return stmt.executeUpdate() == 1;
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Failed to withdraw listing " + id, e);
             return false;
         }
     }
@@ -652,6 +756,73 @@ public class MainDatabase {
             stmt.executeUpdate();
         } catch (SQLException e) {
             logger.log(Level.SEVERE, "Failed to delete pending deed " + id, e);
+        }
+    }
+
+    // ---------- jobs ----------
+
+    /** Blocking. Null if the player has never picked a job. */
+    public JobProfile getJobProfile(UUID uuid) {
+        String sql = "SELECT job, upgrade_1, upgrade_2, upgrade_3 FROM jobs WHERE uuid = ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, uuid.toString());
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    Job job = Job.fromName(rs.getString("job"));
+                    return job == null ? null
+                            : new JobProfile(job, rs.getInt("upgrade_1"), rs.getInt("upgrade_2"), rs.getInt("upgrade_3"));
+                }
+            }
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Failed to read job for " + uuid, e);
+        }
+        return null;
+    }
+
+    /** Blocking. Picks (or switches to) a job - every upgrade track restarts at 0. */
+    public void setJob(UUID uuid, Job job) {
+        String sql = "INSERT INTO jobs (uuid, job, upgrade_level, upgrade_1, upgrade_2, upgrade_3, chosen_at) "
+                + "VALUES (?, ?, 0, 0, 0, 0, CURRENT_TIMESTAMP) "
+                + "ON DUPLICATE KEY UPDATE job = VALUES(job), upgrade_level = 0, upgrade_1 = 0, upgrade_2 = 0, "
+                + "upgrade_3 = 0, chosen_at = CURRENT_TIMESTAMP";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, uuid.toString());
+            stmt.setString(2, job.name());
+            stmt.executeUpdate();
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Failed to set job for " + uuid, e);
+        }
+    }
+
+    /** Blocking. `track` is 0..2. */
+    public void setJobUpgradeLevel(UUID uuid, int track, int level) {
+        String column = switch (track) {
+            case 0 -> "upgrade_1";
+            case 1 -> "upgrade_2";
+            default -> "upgrade_3";
+        };
+        String sql = "UPDATE jobs SET " + column + " = ? WHERE uuid = ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, level);
+            stmt.setString(2, uuid.toString());
+            stmt.executeUpdate();
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Failed to update job track " + track + " for " + uuid, e);
+        }
+    }
+
+    /** Blocking. OP reset - the player goes back to having no job at all. */
+    public void deleteJob(UUID uuid) {
+        String sql = "DELETE FROM jobs WHERE uuid = ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, uuid.toString());
+            stmt.executeUpdate();
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Failed to delete job for " + uuid, e);
         }
     }
 

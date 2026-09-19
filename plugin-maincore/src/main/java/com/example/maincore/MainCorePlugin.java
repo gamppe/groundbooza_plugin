@@ -30,8 +30,6 @@ public class MainCorePlugin extends JavaPlugin {
     private PvpProtectionState pvpProtectionState;
     private MarketController marketController;
     private StarterKitListener starterKitListener;
-    private RentalToolItem rentalToolItem;
-    private RentalVoucherItem rentalVoucherItem;
     private ShopController shopController;
     private SpecialHoeItem specialHoeItem;
     private SpecialPickaxeItem specialPickaxeItem;
@@ -40,6 +38,16 @@ public class MainCorePlugin extends JavaPlugin {
     private CompassBiomeFinderItem compassBiomeFinderItem;
     private SpecialToolListener specialToolListener;
     private ReservationDeedItem reservationDeedItem;
+    private SpeedBootsItem speedBootsItem;
+    private JobManager jobManager;
+    private JobController jobController;
+    private MinerAbilities minerAbilities;
+    private TerraformController terraformController;
+    private AnimalEggItem animalEggItem;
+    private CropRules cropRules;
+    private FarmerAbilities farmerAbilities;
+    private AnimalFeeding animalFeeding;
+    private HorseLeadItem horseLeadItem;
 
     @Override
     public void onEnable() {
@@ -70,21 +78,31 @@ public class MainCorePlugin extends JavaPlugin {
         this.pendingPurchaseManager = new PendingPurchaseManager();
         this.pvpProtectionState = new PvpProtectionState();
         this.marketController = new MarketController(this);
-        this.rentalToolItem = new RentalToolItem(this);
-        this.rentalVoucherItem = new RentalVoucherItem(this);
         this.specialHoeItem = new SpecialHoeItem(this);
         this.specialPickaxeItem = new SpecialPickaxeItem(this);
         this.specialAxeItem = new SpecialAxeItem(this);
         this.fishingRodTierItem = new FishingRodTierItem(this);
         this.compassBiomeFinderItem = new CompassBiomeFinderItem(this);
         this.reservationDeedItem = new ReservationDeedItem(this);
+        this.speedBootsItem = new SpeedBootsItem(this);
+        this.jobManager = new JobManager(this);
+        this.jobController = new JobController(this);
+        this.minerAbilities = new MinerAbilities(this);
+        this.terraformController = new TerraformController(this);
+        this.animalEggItem = new AnimalEggItem(this);
+        this.cropRules = new CropRules(this);
+        this.farmerAbilities = new FarmerAbilities(this);
+        this.animalFeeding = new AnimalFeeding(this);
+        this.horseLeadItem = new HorseLeadItem(this);
         this.shopController = new ShopController(this);
 
         LandCommand landCommand = new LandCommand(this);
         getCommand("땅").setExecutor(landCommand);
         getCommand("땅").setTabCompleter(landCommand);
 
-        getCommand("크레딧").setExecutor(new CreditCommand(this));
+        CreditCommand creditCommand = new CreditCommand(this);
+        getCommand("크레딧").setExecutor(creditCommand);
+        getCommand("크레딧").setTabCompleter(creditCommand);
 
         CreditGiveCommand creditGiveCommand = new CreditGiveCommand(this);
         getCommand("크레딧지급").setExecutor(creditGiveCommand);
@@ -106,6 +124,12 @@ public class MainCorePlugin extends JavaPlugin {
         getCommand("groundbuza_market_buy_cancel").setExecutor(new MarketBuyCancelCommand());
         getCommand("거래소").setExecutor(new MarketCommand(this));
         getCommand("상점").setExecutor(new ShopCommand(this));
+        JobCommand jobCommand = new JobCommand(this);
+        getCommand("직업").setExecutor(jobCommand);
+        getCommand("직업").setTabCompleter(jobCommand);
+        JobConfirmCommand jobConfirmCommand = new JobConfirmCommand(this);
+        getCommand("groundbuza_job_confirm").setExecutor(jobConfirmCommand);
+        getCommand("groundbuza_job_cancel").setExecutor(jobConfirmCommand);
 
         getServer().getPluginManager().registerEvents(new LandProtectionListener(this), this);
         getServer().getPluginManager().registerEvents(flightListener, this);
@@ -121,23 +145,36 @@ public class MainCorePlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new LavaProtectionListener(this), this);
         getServer().getPluginManager().registerEvents(new ExplosionListener(), this);
         getServer().getPluginManager().registerEvents(new EntityProtectionListener(this), this);
-        getServer().getPluginManager().registerEvents(new AnimalSpawnListener(), this);
+        getServer().getPluginManager().registerEvents(new AnimalSpawnListener(this), this);
         starterKitListener = new StarterKitListener(this);
         getServer().getPluginManager().registerEvents(starterKitListener, this);
         getCommand("초보자팩").setExecutor(new StarterKitCommand(this));
         getServer().getPluginManager().registerEvents(new MarketListener(this), this);
         getServer().getPluginManager().registerEvents(new ShopListener(this), this);
+        getServer().getPluginManager().registerEvents(new JobListener(this), this);
+        getServer().getPluginManager().registerEvents(minerAbilities, this);
+        getServer().getPluginManager().registerEvents(cropRules, this);
+        getServer().getPluginManager().registerEvents(farmerAbilities, this);
+        getServer().getPluginManager().registerEvents(animalFeeding, this);
+        getServer().getPluginManager().registerEvents(new HorseLeadListener(this), this);
+        Bukkit.getScheduler().runTaskTimer(this, farmerAbilities::tick, 1L, 5L);
+        getServer().getPluginManager().registerEvents(new TerraformListener(this), this);
+        TerraformConfirmCommand terraformConfirmCommand = new TerraformConfirmCommand(this);
+        getCommand("groundbuza_terraform_confirm").setExecutor(terraformConfirmCommand);
+        getCommand("groundbuza_terraform_cancel").setExecutor(terraformConfirmCommand);
+        Bukkit.getScheduler().runTaskTimer(this, terraformController::sweepExpiredBrushes, 100L, 100L);
+        Bukkit.getScheduler().runTaskTimer(this, minerAbilities::tick, 1L, 5L);
         specialToolListener = new SpecialToolListener(this);
         getServer().getPluginManager().registerEvents(specialToolListener, this);
         getCommand("groundbuza_compass_set").setExecutor(new CompassSetBiomeCommand(this));
         Bukkit.getScheduler().runTaskTimer(this, specialToolListener::tickWorldEditAxe, 1L, 1L);
+        Bukkit.getScheduler().runTaskTimer(this, specialToolListener::tickMagnetPickaxe, 1L, 2L);
 
         LavaVoidFishingListener lavaVoidFishingListener = new LavaVoidFishingListener(this);
         getServer().getPluginManager().registerEvents(lavaVoidFishingListener, this);
         Bukkit.getScheduler().runTaskTimer(this, lavaVoidFishingListener::tick, 1L, 1L);
         removeExistingAnimalsOnce();
         marketController.startExpirySweep();
-        new RentalExpiryTask(this).start();
 
         Bukkit.getWorlds().forEach(world -> world.setGameRule(GameRule.DO_FIRE_TICK, false));
 
@@ -242,14 +279,6 @@ public class MainCorePlugin extends JavaPlugin {
         return starterKitListener;
     }
 
-    public RentalToolItem getRentalToolItem() {
-        return rentalToolItem;
-    }
-
-    public RentalVoucherItem getRentalVoucherItem() {
-        return rentalVoucherItem;
-    }
-
     public ShopController getShopController() {
         return shopController;
     }
@@ -282,29 +311,70 @@ public class MainCorePlugin extends JavaPlugin {
         return reservationDeedItem;
     }
 
+    public SpeedBootsItem getSpeedBootsItem() {
+        return speedBootsItem;
+    }
+
+    public JobManager getJobManager() {
+        return jobManager;
+    }
+
+    public JobController getJobController() {
+        return jobController;
+    }
+
+    public MinerAbilities getMinerAbilities() {
+        return minerAbilities;
+    }
+
+    public TerraformController getTerraformController() {
+        return terraformController;
+    }
+
+    public AnimalEggItem getAnimalEggItem() {
+        return animalEggItem;
+    }
+
+    public CropRules getCropRules() {
+        return cropRules;
+    }
+
+    public FarmerAbilities getFarmerAbilities() {
+        return farmerAbilities;
+    }
+
+    public AnimalFeeding getAnimalFeeding() {
+        return animalFeeding;
+    }
+
+    public HorseLeadItem getHorseLeadItem() {
+        return horseLeadItem;
+    }
+
     /** Anything tagged 거래불가 - checked by both the marketplace and plain /거래 staging so the
      * lore's promise actually holds everywhere, not just on /거래 거래소. Claimed land deeds
      * (normal or 토지선점권) are deliberately NOT here - trading those is their whole point. */
     public boolean isUntradeable(ItemStack item) {
-        return rentalToolItem.isRentalTool(item)
-                || specialHoeItem.isSpecialHoe(item)
+        return specialHoeItem.isSpecialHoe(item)
                 || specialPickaxeItem.isSpecialPickaxe(item)
                 || specialAxeItem.isSpecialAxe(item)
                 || fishingRodTierItem.isSpecialRod(item)
                 || compassBiomeFinderItem.isSpecialCompass(item)
+                || speedBootsItem.isSpecialBoots(item)
+                || terraformController.isBrush(item)
                 || pendingDeedItem.isPending(item)
                 || reservationDeedItem.isBlank(item);
     }
 
-    /** Rental tools and special tools (unlike blank/claimed deeds) are locked to a single owner
-     * strictly - dropped or otherwise, nobody else may even pick one up. */
+    /** Special tools (unlike blank/claimed deeds) are locked to a single owner strictly - dropped
+     * or otherwise, nobody else may even pick one up. */
     public boolean isOwnerLockedTool(ItemStack item) {
-        return rentalToolItem.isRentalTool(item)
-                || specialHoeItem.isSpecialHoe(item)
+        return specialHoeItem.isSpecialHoe(item)
                 || specialPickaxeItem.isSpecialPickaxe(item)
                 || specialAxeItem.isSpecialAxe(item)
                 || fishingRodTierItem.isSpecialRod(item)
-                || compassBiomeFinderItem.isSpecialCompass(item);
+                || compassBiomeFinderItem.isSpecialCompass(item)
+                || speedBootsItem.isSpecialBoots(item);
     }
 
     public void tagToolOwner(ItemStack item, UUID owner) {

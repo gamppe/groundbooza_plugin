@@ -179,6 +179,30 @@ public class LandBuyListener implements Listener {
         }
     }
 
+    /** Undoes placeForSaleSigns when a 토지선점권 is given up: clears any sign sitting on top of
+     * the cell's edge blocks (only signs - anything else the world grew there is left alone). */
+    public static void removeForSaleSigns(World world, int cellX, int cellZ) {
+        int minX = LandGrid.minX(cellX);
+        int minZ = LandGrid.minZ(cellZ);
+        int maxX = LandGrid.maxX(cellX);
+        int maxZ = LandGrid.maxZ(cellZ);
+        for (int x = minX; x <= maxX; x++) {
+            removeSignAt(world, x, minZ);
+            removeSignAt(world, x, maxZ);
+        }
+        for (int z = minZ; z <= maxZ; z++) {
+            removeSignAt(world, minX, z);
+            removeSignAt(world, maxX, z);
+        }
+    }
+
+    private static void removeSignAt(World world, int x, int z) {
+        Block top = world.getHighestBlockAt(x, z);
+        if (top.getType() == Material.OAK_SIGN) {
+            top.setType(Material.AIR, false);
+        }
+    }
+
     private void placeForSaleSign(World world, int x, int z, double centerX, double centerZ, String playerName) {
         Block ground = world.getHighestBlockAt(x, z);
         Block signBlock = ground.getRelative(0, 1, 0);

@@ -27,7 +27,7 @@ import java.util.List;
 public class ReservationDeedItem {
 
     public static final long DURATION_MILLIS = 3L * 24 * 60 * 60 * 1000; // 3 days
-    public static final String FIXED_NAME = "무허가";
+    public static final String FIXED_NAME = "임시점유중";
 
     private final NamespacedKey blankMarkerKey;
     private final NamespacedKey claimedMarkerKey;

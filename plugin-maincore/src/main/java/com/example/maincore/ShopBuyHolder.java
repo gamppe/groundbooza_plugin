@@ -7,6 +7,8 @@ public class ShopBuyHolder implements InventoryHolder {
 
     public static final int SIZE = 27;
     public static final int SLOT_BACK = 18; // bottom-left corner
+    /** Not a catalog category - opens the 테라포밍 utility menu (TerraformController). */
+    public static final int SLOT_TERRAFORM = 24;
 
     private Inventory inventory;
 
@@ -17,7 +19,6 @@ public class ShopBuyHolder implements InventoryHolder {
             case DYEABLE_BLOCK -> 6;
             case WOOD_STONE -> 20;
             case DECORATION -> 22;
-            case TOOL_RENTAL -> 24;
         };
     }
 

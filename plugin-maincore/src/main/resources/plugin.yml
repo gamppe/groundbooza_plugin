@@ -8,8 +8,8 @@ commands:
     description: Land purchase and deed storage
     usage: /땅 <구매|문서> [이름]
   크레딧:
-    description: Check or withdraw your credit balance
-    usage: /크레딧 [숫자]
+    description: Check, withdraw or transfer credits
+    usage: /크레딧 [출금 <숫자> | 송금 <플레이어> <숫자>]
   크레딧지급:
     description: Grant credits to a player (OP only)
     usage: /크레딧지급 <닉네임> <액수>
@@ -52,6 +52,17 @@ commands:
     usage: /상점
   groundbuza_compass_set:
     description: Set the biome-finder compass's target biome
+  직업:
+    description: Pick a job or open your job profile
+    usage: /직업
+  groundbuza_job_confirm:
+    description: Confirm a pending job choice
+  groundbuza_job_cancel:
+    description: Cancel a pending job choice
+  groundbuza_terraform_confirm:
+    description: Confirm a pending terraforming job
+  groundbuza_terraform_cancel:
+    description: Cancel a pending terraforming job
 
 permissions:
   maincore.creditgive:
@@ -62,4 +73,7 @@ permissions:
     default: op
   maincore.starterkit:
     description: Allows re-giving the starter kit for debugging
+    default: op
+  maincore.jobreset:
+    description: Allows resetting a player's job
     default: op

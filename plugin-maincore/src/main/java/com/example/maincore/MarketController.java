@@ -82,32 +82,56 @@ public class MarketController {
             if (!plugin.getMainDatabase().deleteListingIfExists(listing.id())) {
                 return;
             }
-            if (listing.category() == MainDatabase.MarketCategory.LAND) {
-                MainDatabase.Land currentLand = plugin.getLandManager().getLandById(listing.landId());
-                if (currentLand != null && currentLand.reservation()) {
-                    // Still nobody's - just hand the physical deed back, ownership untouched.
-                    Bukkit.getScheduler().runTask(plugin, () -> {
-                        player.getInventory().addItem(plugin.getReservationDeedItem().createClaimed(currentLand));
-                        player.sendMessage(Component.text("땅을 반환받았습니다.", NamedTextColor.GREEN));
-                    });
-                    return;
-                }
-                plugin.getLandManager().transferOwnershipAsync(listing.landId(), listing.seller(), () -> {
-                    MainDatabase.Land land = plugin.getLandManager().getLandById(listing.landId());
-                    Bukkit.getScheduler().runTask(plugin, () -> {
-                        if (land != null) {
-                            player.getInventory().addItem(plugin.getDeedItem().create(land, player.getName()));
-                        }
-                        player.sendMessage(Component.text("땅을 반환받았습니다.", NamedTextColor.GREEN));
-                    });
-                });
-            } else {
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    player.getInventory().addItem(listing.item());
-                    player.sendMessage(Component.text("아이템을 반환받았습니다.", NamedTextColor.GREEN));
-                });
-            }
+            returnToSeller(player, listing, "반환받았습니다");
         });
+    }
+
+    /** Click on a still-ACTIVE entry in 거래현황: pull it off the market early. The status-guarded
+     * delete is what makes this safe against a buyer landing at the same instant. */
+    public void withdrawActive(Player player, MainDatabase.MarketListing listing) {
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            if (!listing.seller().equals(player.getUniqueId()) || listing.status() != MainDatabase.MarketStatus.ACTIVE) {
+                return;
+            }
+            if (!plugin.getMainDatabase().deleteActiveListing(listing.id())) {
+                Bukkit.getScheduler().runTask(plugin, () -> player.sendMessage(
+                        Component.text("이미 판매되었거나 만료된 물건입니다. 거래현황을 다시 확인하세요.", NamedTextColor.RED)));
+                return;
+            }
+            returnToSeller(player, listing, "회수했습니다");
+        });
+    }
+
+    /** Async-thread half of collecting/withdrawing: the listing row is already gone, now put the
+     * goods back in the seller's hands. `verb` is the past-tense ending for the chat line. */
+    private void returnToSeller(Player player, MainDatabase.MarketListing listing, String verb) {
+        if (listing.category() == MainDatabase.MarketCategory.LAND) {
+            MainDatabase.Land currentLand = plugin.getLandManager().getLandById(listing.landId());
+            if (currentLand != null && currentLand.reservation()) {
+                // Still nobody's - the owner column goes back from MARKET_OWNER to the reservation
+                // sentinel (holder untouched), and the physical deed is handed back.
+                plugin.getLandManager().transferOwnershipAsync(listing.landId(), MainDatabase.RESERVATION_OWNER, () -> {
+                    MainDatabase.Land land = plugin.getLandManager().getLandById(listing.landId());
+                    if (land != null) {
+                        player.getInventory().addItem(plugin.getReservationDeedItem().createClaimed(land));
+                    }
+                    player.sendMessage(Component.text("땅을 " + verb + ".", NamedTextColor.GREEN));
+                });
+                return;
+            }
+            plugin.getLandManager().transferOwnershipAsync(listing.landId(), listing.seller(), () -> {
+                MainDatabase.Land land = plugin.getLandManager().getLandById(listing.landId());
+                if (land != null) {
+                    player.getInventory().addItem(plugin.getDeedItem().create(land, player.getName()));
+                }
+                player.sendMessage(Component.text("땅을 " + verb + ".", NamedTextColor.GREEN));
+            });
+        } else {
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                player.getInventory().addItem(listing.item());
+                player.sendMessage(Component.text("아이템을 " + verb + ".", NamedTextColor.GREEN));
+            });
+        }
     }
 
     /** Right-click on an EXPIRED entry: put it straight back on the market for another 24h. */
@@ -425,10 +449,22 @@ public class MarketController {
 
     private ItemStack buildStatusIcon(MainDatabase.MarketListing listing) {
         return switch (listing.status()) {
-            case ACTIVE -> simpleIcon(Material.BARRIER, "거래 대기중", NamedTextColor.GRAY);
+            case ACTIVE -> buildActiveIcon();
             case SOLD -> buildClaimIcon(listing);
             case EXPIRED -> buildExpiredIcon();
         };
+    }
+
+    private ItemStack buildActiveIcon() {
+        ItemStack item = new ItemStack(Material.BARRIER);
+        ItemMeta meta = item.getItemMeta();
+        meta.displayName(Component.text("거래 대기중", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        meta.lore(List.of(
+                Component.text("클릭하여 조기 회수", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+                Component.text("(거래소에서 내려오고 물건을 돌려받습니다)", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)
+        ));
+        item.setItemMeta(meta);
+        return item;
     }
 
     private ItemStack buildExpiredIcon() {

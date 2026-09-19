@@ -55,11 +55,14 @@ public class MarketListener implements Listener {
         }
 
         MainDatabase.MarketListing listing = holder.listingInStatusSlot(event.getSlot());
-        if (listing == null || listing.status() == MainDatabase.MarketStatus.ACTIVE) {
-            return; // either not a status slot, or still pending - no interaction
+        if (listing == null) {
+            return; // not a status slot
         }
 
-        if (listing.status() == MainDatabase.MarketStatus.SOLD) {
+        if (listing.status() == MainDatabase.MarketStatus.ACTIVE) {
+            player.closeInventory();
+            plugin.getMarketController().withdrawActive(player, listing);
+        } else if (listing.status() == MainDatabase.MarketStatus.SOLD) {
             player.closeInventory();
             plugin.getMarketController().claimSale(player, listing);
         } else if (listing.status() == MainDatabase.MarketStatus.EXPIRED) {

@@ -6,6 +6,11 @@ mysql:
   user: root
   password: "CHANGE_ME"
 
+# Name of MainCore's MySQL database (schema). Farm-server reads the `jobs` table from it so
+# job-locked tools and job abilities work here too - the mysql.user above needs
+# SELECT on <jobs-schema>.jobs (e.g. GRANT SELECT ON mc_maincore.jobs TO 'serverbridge'@'localhost').
+jobs-schema: "mc_maincore"
+
 # Which server /파밍이동 sends the player to.
 # Set to "farm" on main-server, and "main" on farm-server.
 target-server: "farm"

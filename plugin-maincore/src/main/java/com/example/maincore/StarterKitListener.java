@@ -39,14 +39,11 @@ public class StarterKitListener implements Listener {
 
     /** Also callable directly (e.g. from a debug command) to re-give the kit on demand. */
     public void giveKit(Player player) {
-        ItemStack vouchers = plugin.getRentalVoucherItem().create();
-        vouchers.setAmount(2);
         player.getInventory().addItem(
                 new ItemStack(Material.IRON_PICKAXE),
                 new ItemStack(Material.IRON_SHOVEL),
                 new ItemStack(Material.IRON_AXE),
                 new ItemStack(Material.BREAD, 20),
-                vouchers,
                 buildGuideBook()
         );
 
@@ -57,7 +54,7 @@ public class StarterKitListener implements Listener {
 
         player.sendMessage(Component.text(
                 "환영합니다! 초보자 지원 물품(가이드북, 크레딧 " + STARTER_CREDITS
-                        + ", 철 도구, 빵 20개, 도구 대여권 2장)을 받았습니다.",
+                        + ", 철 도구, 빵 20개)을 받았습니다.",
                 NamedTextColor.GREEN));
     }
 
@@ -103,7 +100,7 @@ public class StarterKitListener implements Listener {
                         .decoration(TextDecoration.UNDERLINED, true)
                         .clickEvent(ClickEvent.runCommand("/직업"))
                         .hoverEvent(HoverEvent.showText(Component.text("클릭해서 보기!").decoration(TextDecoration.ITALIC, true))))
-                .append(Component.text("으로 고르세요. (변경 불가!)\n\n", NamedTextColor.BLACK))
+                .append(Component.text("으로 고르세요.\n(나중에 바꾸려면 수수료가 듭니다!)\n\n", NamedTextColor.BLACK))
                 .append(jobLink("농부", 3)).append(Component.text("  "))
                 .append(jobLink("어부", 4))
                 .append(Component.text("\n"))

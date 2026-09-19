@@ -15,11 +15,12 @@ import org.bukkit.persistence.PersistentDataType;
 
 public class BoxListener implements Listener {
 
-    // MainCore tags its untradeable rental tools, the main-server-only WorldEdit axe, and every
-    // kind of land deed (land only exists on main-server, so none of these belong over here)
-    // with these keys. Read literally by namespace/key rather than depending on the MainCore
+    // MainCore tags the main-server-only WorldEdit axe, its 10-minute terraforming brush, and
+    // every kind of land deed (land only exists on main-server, so none of these belong over
+    // here) with these keys. Read literally by namespace/key rather than depending on the MainCore
     // plugin, since the two plugins are otherwise unrelated.
-    private static final NamespacedKey RENTAL_MARKER_KEY = new NamespacedKey("maincore", "rental_marker");
+    private static final NamespacedKey BRUSH_MARKER_KEY = new NamespacedKey("maincore", "terraform_brush");
+    private static final NamespacedKey HORSE_LEAD_KEY = new NamespacedKey("maincore", "horse_lead");
     private static final NamespacedKey AXE_MARKER_KEY = new NamespacedKey("maincore", "special_axe");
     private static final NamespacedKey LAND_DEED_KEY = new NamespacedKey("maincore", "land_deed");
     private static final NamespacedKey PENDING_DEED_KEY = new NamespacedKey("maincore", "pending_deed");
@@ -81,7 +82,8 @@ public class BoxListener implements Listener {
             return false;
         }
         var pdc = item.getItemMeta().getPersistentDataContainer();
-        return Boolean.TRUE.equals(pdc.get(RENTAL_MARKER_KEY, PersistentDataType.BOOLEAN))
+        return Boolean.TRUE.equals(pdc.get(BRUSH_MARKER_KEY, PersistentDataType.BOOLEAN))
+                || Boolean.TRUE.equals(pdc.get(HORSE_LEAD_KEY, PersistentDataType.BOOLEAN))
                 || Boolean.TRUE.equals(pdc.get(AXE_MARKER_KEY, PersistentDataType.BOOLEAN))
                 || Boolean.TRUE.equals(pdc.get(LAND_DEED_KEY, PersistentDataType.BOOLEAN))
                 || Boolean.TRUE.equals(pdc.get(PENDING_DEED_KEY, PersistentDataType.BOOLEAN))

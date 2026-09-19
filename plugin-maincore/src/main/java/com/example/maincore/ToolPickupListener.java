@@ -8,7 +8,7 @@ import org.bukkit.inventory.ItemStack;
 
 import java.util.UUID;
 
-/** Rental/special tools are locked to whoever bought them - unlike documents, which stay
+/** Special tools are locked to whoever bought them - unlike documents, which stay
  * pickupable by anyone but simply fail to work for the wrong person, a dropped tool can't even
  * be picked up by someone else. */
 public class ToolPickupListener implements Listener {

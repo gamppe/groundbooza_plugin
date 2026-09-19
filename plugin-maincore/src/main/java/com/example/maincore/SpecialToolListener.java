@@ -46,17 +46,24 @@ import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 
-/** Abilities for the special-shop tools: 3x3 till + insta-harvest + fast dig (hoe), item magnet +
+/** Abilities for the special-shop tools: range till/sow/harvest + fast dig (hoe), item magnet +
  * occasional harmless "explosion" (pickaxe), a WorldEdit-style two-click fill (axe), and a
  * nearest-biome compass. Runs on main-server; ServerBridge carries an equivalent copy for
- * farm-server for the hoe/pickaxe/compass (the axe is intentionally main-server only). */
+ * farm-server for the hoe/pickaxe/compass (the axe is intentionally main-server only).
+ *
+ * Every tool only works for a player currently in its job (JobManager.canUse) - after a job
+ * change the old tools stay in the inventory but do nothing. Ranges scale with the upgrade
+ * level baked into each item (ToolLevel). */
 public class SpecialToolListener implements Listener {
 
     private static final Set<Material> TILLABLE = Set.of(
             Material.DIRT, Material.GRASS_BLOCK, Material.DIRT_PATH, Material.COARSE_DIRT, Material.ROOTED_DIRT);
     private static final Set<Material> FAST_DIG = Set.of(Material.DIRT, Material.GRASS_BLOCK);
-    private static final double EXPLOSION_CHANCE = 0.08;
-    private static final long MAX_FILL_VOLUME = 10_000;
+    /** Anything tougher than this shrugs the pickaxe blast off (obsidian/anvil/ender chest are
+     * 600-1200, bedrock is astronomical; ordinary stone is 6, end stone 9). */
+    private static final float BLAST_RESISTANCE_CAP = 30f;
+    private static final double MAGNET_RADIUS = 6.0;
+    private static final double MAGNET_SPEED = 0.18;
     private static final double AXE_REACH_FALLBACK = 5.5;
     private static final double AXE_REACH_BOOST = 1.0;
 
@@ -82,11 +89,16 @@ public class SpecialToolListener implements Listener {
         this.reachModifierKey = new NamespacedKey(plugin, "axe_reach_boost");
     }
 
+    /** The axe is only "held" for our purposes if the holder's job also allows it. */
+    private boolean holdingUsableAxe(Player player, ItemStack item) {
+        return plugin.getSpecialAxeItem().isSpecialAxe(item) && plugin.getJobManager().canUse(player, item);
+    }
+
     @EventHandler(ignoreCancelled = true)
     public void onInteract(PlayerInteractEvent event) {
         Player player = event.getPlayer();
         ItemStack mainHandItem = player.getInventory().getItemInMainHand();
-        boolean holdingAxe = plugin.getSpecialAxeItem().isSpecialAxe(mainHandItem);
+        boolean holdingAxe = holdingUsableAxe(player, mainHandItem);
 
         if (event.getHand() == EquipmentSlot.OFF_HAND) {
             if (holdingAxe) {
@@ -111,6 +123,10 @@ public class SpecialToolListener implements Listener {
 
         if (plugin.getCompassBiomeFinderItem().isSpecialCompass(hand)) {
             event.setCancelled(true);
+            if (!plugin.getJobManager().canUse(player, hand)) {
+                denyWrongJob(player);
+                return;
+            }
             handleCompassInteract(player, hand);
             return;
         }
@@ -129,11 +145,19 @@ public class SpecialToolListener implements Listener {
 
         if (plugin.getSpecialHoeItem().isSpecialHoe(hand)) {
             event.setCancelled(true);
-            handleHoeInteract(clicked);
-        } else if (plugin.getSpecialAxeItem().isSpecialAxe(hand)) {
+            if (!plugin.getJobManager().canUse(player, hand)) {
+                denyWrongJob(player);
+                return;
+            }
+            handleHoeInteract(player, hand, clicked, plugin.getSpecialHoeItem().getLevel(hand));
+        } else if (holdingAxe) {
             event.setCancelled(true);
-            handleAxeInteract(player, clicked);
+            handleAxeInteract(player, clicked, plugin.getSpecialAxeItem().getLevel(hand));
         }
+    }
+
+    private void denyWrongJob(Player player) {
+        player.sendMessage(Component.text("내 직업의 내 도구만 사용할 수 있습니다.", NamedTextColor.RED));
     }
 
     @EventHandler
@@ -214,40 +238,84 @@ public class SpecialToolListener implements Listener {
         player.sendMessage(Component.text("가장 가까운 " + biomeLabel(target) + " 방향을 가리킵니다.", NamedTextColor.GREEN));
     }
 
-    // ---------- hoe: till / harvest / fast dig ----------
+    // ---------- hoe: till / plant / harvest / fast dig ----------
 
-    private void handleHoeInteract(Block clicked) {
-        if (clicked.getBlockData() instanceof Ageable ageable && ageable.getAge() >= ageable.getMaximumAge()) {
-            harvest(clicked);
+    /** Right-click with the hoe works on an NxN square (SpecialHoeItem.areaSize) around the
+     * clicked block: a mature crop → harvest the square (no replanting), dirt/farmland → till the
+     * square; either way, seeds in the off-hand are then sown on every free farmland block in it. */
+    private void handleHoeInteract(Player player, ItemStack hoe, Block clicked, int level) {
+        int size = SpecialHoeItem.areaSize(level);
+        int lo = -((size - 1) / 2);
+        int hi = size / 2;
+        boolean harvesting = isMatureCrop(clicked);
+        if (!harvesting && !TILLABLE.contains(clicked.getType()) && clicked.getType() != Material.FARMLAND
+                && !CropRules.GROWABLE.contains(clicked.getType())) {
             return;
         }
-        if (TILLABLE.contains(clicked.getType())) {
-            till3x3(clicked);
-        }
-    }
-
-    private void harvest(Block block) {
-        Material cropType = block.getType();
-        for (ItemStack drop : block.getDrops()) {
-            block.getWorld().dropItemNaturally(block.getLocation(), drop);
-        }
-        block.setType(cropType);
-    }
-
-    private void till3x3(Block center) {
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                Block b = center.getRelative(dx, 0, dz);
-                if (TILLABLE.contains(b.getType())) {
+        int harvested = 0;
+        int tilled = 0;
+        for (int dx = lo; dx <= hi; dx++) {
+            for (int dz = lo; dz <= hi; dz++) {
+                Block b = clicked.getRelative(dx, 0, dz);
+                if (!player.isOp() && !plugin.getLandManager().canBuild(b.getLocation(), player.getUniqueId())) {
+                    continue;
+                }
+                if (harvesting) {
+                    if (isMatureCrop(b)) {
+                        for (ItemStack drop : CropRules.dropsWithoutSeeds(b, hoe)) {
+                            b.getWorld().dropItemNaturally(b.getLocation(), drop);
+                        }
+                        b.setType(Material.AIR, false);
+                        harvested++;
+                    }
+                } else if (TILLABLE.contains(b.getType()) && b.getRelative(0, 1, 0).getType().isAir()) {
                     b.setType(Material.FARMLAND);
+                    tilled++;
                 }
             }
         }
+
+        // Sowing pass: whatever's in the off-hand goes onto every farmland block with air above.
+        ItemStack offhand = player.getInventory().getItemInOffHand();
+        Material crop = plugin.getCropRules().cropFor(offhand);
+        int planted = 0;
+        if (crop != null) {
+            // Farmland is either the clicked layer (clicked farmland/dirt) or the layer under a
+            // clicked crop - so look at both the clicked Y and the one below.
+            for (int dx = lo; dx <= hi && offhand.getAmount() > 0; dx++) {
+                for (int dz = lo; dz <= hi && offhand.getAmount() > 0; dz++) {
+                    Block soil = clicked.getRelative(dx, 0, dz);
+                    if (soil.getType() != Material.FARMLAND) {
+                        soil = soil.getRelative(0, -1, 0);
+                    }
+                    if (soil.getType() != Material.FARMLAND) continue;
+                    Block above = soil.getRelative(0, 1, 0);
+                    if (!above.getType().isAir()) continue;
+                    if (!player.isOp() && !plugin.getLandManager().canBuild(above.getLocation(), player.getUniqueId())) {
+                        continue;
+                    }
+                    above.setType(crop, false);
+                    if (player.getGameMode() != org.bukkit.GameMode.CREATIVE) {
+                        offhand.setAmount(offhand.getAmount() - 1);
+                    }
+                    planted++;
+                }
+            }
+        }
+        if (harvested + tilled + planted > 0) {
+            player.swingMainHand();
+        }
+    }
+
+    private static boolean isMatureCrop(Block block) {
+        return CropRules.GROWABLE.contains(block.getType())
+                && block.getBlockData() instanceof Ageable ageable && ageable.getAge() >= ageable.getMaximumAge();
     }
 
     @EventHandler(ignoreCancelled = true)
     public void onBlockDamage(BlockDamageEvent event) {
-        if (!plugin.getSpecialHoeItem().isSpecialHoe(event.getItemInHand())) {
+        if (!plugin.getSpecialHoeItem().isSpecialHoe(event.getItemInHand())
+                || !plugin.getJobManager().canUse(event.getPlayer(), event.getItemInHand())) {
             return;
         }
         if (FAST_DIG.contains(event.getBlock().getType())) {
@@ -260,7 +328,8 @@ public class SpecialToolListener implements Listener {
     @EventHandler(ignoreCancelled = true)
     public void onBlockDrop(BlockDropItemEvent event) {
         Player player = event.getPlayer();
-        if (!plugin.getSpecialPickaxeItem().isSpecialPickaxe(player.getInventory().getItemInMainHand())) {
+        ItemStack tool = player.getInventory().getItemInMainHand();
+        if (!plugin.getSpecialPickaxeItem().isSpecialPickaxe(tool) || !plugin.getJobManager().canUse(player, tool)) {
             return;
         }
         for (Item itemEntity : event.getItems()) {
@@ -269,24 +338,39 @@ public class SpecialToolListener implements Listener {
         }
     }
 
+    /** The blast is an NxNxN cube that starts at the broken block and extends *away* from the
+     * player along whichever axis they're looking down - so mining forward never eats the floor
+     * under their feet. Blocks are only taken if their blast resistance is low enough (obsidian
+     * and friends survive), and the column directly under the player is always spared. */
     @EventHandler(ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
         Player player = event.getPlayer();
         ItemStack tool = player.getInventory().getItemInMainHand();
-        if (!plugin.getSpecialPickaxeItem().isSpecialPickaxe(tool)) {
+        if (!plugin.getSpecialPickaxeItem().isSpecialPickaxe(tool) || !plugin.getJobManager().canUse(player, tool)) {
             return;
         }
-        if (random.nextDouble() >= EXPLOSION_CHANCE) {
-            return;
+        int level = plugin.getSpecialPickaxeItem().getLevel(tool);
+        int size = SpecialPickaxeItem.explosionSize(level);
+        if (size <= 0 || random.nextDouble() >= SpecialPickaxeItem.explosionChance(level)) {
+            return; // level 0 has no blast at all
         }
 
         Block origin = event.getBlock();
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    if (dx == 0 && dy == 0 && dz == 0) continue;
-                    Block target = origin.getRelative(dx, dy, dz);
-                    if (target.getType().isAir() || target.getType() == Material.BEDROCK) continue;
+        Vector facing = dominantAxis(player.getEyeLocation().getDirection());
+        int lo = -((size - 1) / 2);
+        int hi = size / 2;
+        Location feet = player.getLocation();
+
+        for (int depth = 0; depth < size; depth++) {
+            for (int a = lo; a <= hi; a++) {
+                for (int b = lo; b <= hi; b++) {
+                    Block target = blastBlock(origin, facing, depth, a, b);
+                    if (target.equals(origin)) continue;
+                    if (!isBlastable(target)) continue;
+                    if (target.getX() == feet.getBlockX() && target.getZ() == feet.getBlockZ()
+                            && target.getY() < feet.getBlockY()) {
+                        continue; // never knock out the pillar the player is standing on
+                    }
                     if (!player.isOp() && !plugin.getLandManager().canBuild(target.getLocation(), player.getUniqueId())) {
                         continue;
                     }
@@ -294,8 +378,56 @@ public class SpecialToolListener implements Listener {
                 }
             }
         }
-        origin.getWorld().spawnParticle(Particle.EXPLOSION, origin.getLocation().add(0.5, 0.5, 0.5), 1);
+        Location center = blastBlock(origin, facing, size / 2, 0, 0).getLocation().add(0.5, 0.5, 0.5);
+        origin.getWorld().spawnParticle(Particle.EXPLOSION, center, 1);
         origin.getWorld().playSound(origin.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 1f, 1f);
+    }
+
+    /** Snaps a look direction to the single axis it mostly points along (one of the 6 faces). */
+    private static Vector dominantAxis(Vector dir) {
+        double ax = Math.abs(dir.getX()), ay = Math.abs(dir.getY()), az = Math.abs(dir.getZ());
+        if (ax >= ay && ax >= az) return new Vector(Math.signum(dir.getX()), 0, 0);
+        if (ay >= az) return new Vector(0, Math.signum(dir.getY()), 0);
+        return new Vector(0, 0, Math.signum(dir.getZ()));
+    }
+
+    /** `depth` runs along the facing axis away from the player; `a`/`b` span the other two. */
+    private static Block blastBlock(Block origin, Vector facing, int depth, int a, int b) {
+        if (facing.getX() != 0) {
+            return origin.getRelative(depth * (int) facing.getX(), a, b);
+        }
+        if (facing.getY() != 0) {
+            return origin.getRelative(a, depth * (int) facing.getY(), b);
+        }
+        return origin.getRelative(a, b, depth * (int) facing.getZ());
+    }
+
+    private static boolean isBlastable(Block block) {
+        Material type = block.getType();
+        if (type.isAir() || !type.isSolid()) {
+            return false;
+        }
+        return type.getBlastResistance() <= BLAST_RESISTANCE_CAP;
+    }
+
+    /** Called every other tick from MainCorePlugin: anyone holding a usable magnet pickaxe
+     * slowly reels in nearby dropped items (vanilla pickup takes over once they arrive). */
+    public void tickMagnetPickaxe() {
+        for (Player player : org.bukkit.Bukkit.getOnlinePlayers()) {
+            ItemStack hand = player.getInventory().getItemInMainHand();
+            if (!plugin.getSpecialPickaxeItem().isSpecialPickaxe(hand) || !plugin.getJobManager().canUse(player, hand)) {
+                continue;
+            }
+            Location pull = player.getLocation().add(0, 0.8, 0);
+            for (org.bukkit.entity.Entity entity : player.getNearbyEntities(MAGNET_RADIUS, MAGNET_RADIUS, MAGNET_RADIUS)) {
+                if (!(entity instanceof Item item) || item.isDead()) continue;
+                Vector toPlayer = pull.toVector().subtract(item.getLocation().toVector());
+                double distance = toPlayer.length();
+                if (distance < 0.6 || distance > MAGNET_RADIUS) continue;
+                item.setVelocity(toPlayer.normalize().multiply(MAGNET_SPEED).setY(
+                        toPlayer.getY() > 0 ? Math.max(0.05, toPlayer.getY() / distance * MAGNET_SPEED) : 0));
+            }
+        }
     }
 
     // ---------- axe: worldedit-style fill ----------
@@ -307,7 +439,7 @@ public class SpecialToolListener implements Listener {
     public void tickWorldEditAxe() {
         for (Player player : org.bukkit.Bukkit.getOnlinePlayers()) {
             ItemStack hand = player.getInventory().getItemInMainHand();
-            boolean holdingAxe = plugin.getSpecialAxeItem().isSpecialAxe(hand);
+            boolean holdingAxe = holdingUsableAxe(player, hand);
             double reach = updateReachModifier(player, holdingAxe);
             if (!holdingAxe) {
                 clearGhostBarrier(player);
@@ -401,7 +533,7 @@ public class SpecialToolListener implements Listener {
         }
     }
 
-    private void handleAxeInteract(Player player, Block clicked) {
+    private void handleAxeInteract(Player player, Block clicked, int level) {
         UUID uuid = player.getUniqueId();
         Location clickedLoc = clicked.getLocation();
 
@@ -440,9 +572,10 @@ public class SpecialToolListener implements Listener {
         int maxZ = Math.max(a.getBlockZ(), b.getBlockZ());
         long volume = (long) (maxX - minX + 1) * (maxY - minY + 1) * (maxZ - minZ + 1);
 
-        if (volume > MAX_FILL_VOLUME) {
+        long maxVolume = SpecialAxeItem.maxFillVolume(level);
+        if (volume > maxVolume) {
             player.sendMessage(Component.text(
-                    "범위가 너무 큽니다. (최대 " + MAX_FILL_VOLUME + "블록, 선택: " + volume + "블록)", NamedTextColor.RED));
+                    String.format("범위가 너무 큽니다. (최대 %,d블록, 선택: %,d블록)", maxVolume, volume), NamedTextColor.RED));
             return;
         }
 

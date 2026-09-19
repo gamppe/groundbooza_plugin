@@ -32,6 +32,10 @@ public class ServerBridgePlugin extends JavaPlugin {
 
         getCommand("파밍상자").setExecutor(new BoxCommand(this));
         getCommand("파밍이동").setExecutor(new SwitchCommand(this));
+        WhisperCommand whisperCommand = new WhisperCommand(this);
+        getCommand("귓속말").setExecutor(whisperCommand);
+        getCommand("귓속말").setTabCompleter(whisperCommand);
+        getServer().getMessenger().registerIncomingPluginChannel(this, "BungeeCord", whisperCommand);
 
         getServer().getPluginManager().registerEvents(new BoxListener(this), this);
 
@@ -39,10 +43,28 @@ public class ServerBridgePlugin extends JavaPlugin {
         // these abilities - registering both would double every effect (till twice, drop items
         // twice, etc.), so this simpler copy only activates where MainCore is absent.
         if (getServer().getPluginManager().getPlugin("MainCore") == null) {
-            SpecialToolListener specialToolListener = new SpecialToolListener();
+            // Job data is read straight out of MainCore's schema so job-locked tools and the
+            // player-side job abilities behave the same over here.
+            JobCache jobs = new JobCache(this, config.getString("jobs-schema", "mc_maincore"));
+            MinerAbilities minerAbilities = new MinerAbilities(jobs);
+            FarmerAbilities farmerAbilities = new FarmerAbilities(jobs);
+            jobs.setOnLoaded(minerAbilities::syncEfficiency);
+            SpecialToolListener specialToolListener = new SpecialToolListener(jobs);
+            getServer().getPluginManager().registerEvents(jobs, this);
             getServer().getPluginManager().registerEvents(specialToolListener, this);
-            getCommand("groundbuza_compass_set_farm").setExecutor(new CompassSetBiomeCommand(specialToolListener));
-            getLogger().info("MainCore not found - enabling standalone special-tool abilities.");
+            getServer().getPluginManager().registerEvents(new CropRules(), this);
+            getServer().getPluginManager().registerEvents(new AnimalFeeding(farmerAbilities), this);
+            getServer().getPluginManager().registerEvents(minerAbilities, this);
+            getServer().getPluginManager().registerEvents(farmerAbilities, this);
+            getServer().getPluginManager().registerEvents(new FisherAbilities(jobs), this);
+            getCommand("groundbuza_compass_set_farm").setExecutor(new CompassSetBiomeCommand(specialToolListener, jobs));
+            getServer().getScheduler().runTaskTimer(this, specialToolListener::tickMagnetPickaxe, 1L, 2L);
+            getServer().getScheduler().runTaskTimer(this, minerAbilities::tick, 1L, 5L);
+            getServer().getScheduler().runTaskTimer(this, farmerAbilities::tick, 1L, 5L);
+            for (org.bukkit.entity.Player online : getServer().getOnlinePlayers()) {
+                jobs.loadAsync(online.getUniqueId()); // /reload or late enable
+            }
+            getLogger().info("MainCore not found - enabling standalone special-tool abilities + job sync.");
         }
 
         getLogger().info("ServerBridge enabled. target-server=" + targetServer);

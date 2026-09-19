@@ -24,6 +24,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.CompassMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.util.Vector;
 
 import java.util.List;
 import java.util.Map;
@@ -31,7 +32,7 @@ import java.util.Random;
 import java.util.Set;
 
 /**
- * Farm-server's copy of MainCore's special-shop tool abilities: till/harvest/fast-dig (hoe),
+ * Farm-server's copy of MainCore's special-shop tool abilities: range till/sow/harvest + fast-dig (hoe),
  * item magnet + harmless "explosion" (pickaxe), and the nearest-biome compass - read purely by
  * literal PDC namespace so this plugin has no real dependency on MainCore. Only registered when
  * MainCore is NOT present on this server (see ServerBridgePlugin.onEnable) - main-server's own
@@ -47,14 +48,36 @@ public class SpecialToolListener implements Listener {
     private static final NamespacedKey PICKAXE_KEY = new NamespacedKey("maincore", "special_pickaxe");
     private static final NamespacedKey COMPASS_KEY = new NamespacedKey("maincore", "special_compass");
     private static final NamespacedKey COMPASS_TARGET_KEY = new NamespacedKey("maincore", "compass_target_biome");
+    /** MainCore's job-upgrade level, baked into each tool (0 when absent). Mirrors
+     * SpecialHoeItem.tillRadius / SpecialPickaxeItem.explosionRadius: radius = 1 + level. */
+    private static final NamespacedKey TOOL_LEVEL_KEY = new NamespacedKey("maincore", "tool_level");
     private static final int COMPASS_SEARCH_RADIUS = 6400;
 
     private static final Set<Material> TILLABLE = Set.of(
             Material.DIRT, Material.GRASS_BLOCK, Material.DIRT_PATH, Material.COARSE_DIRT, Material.ROOTED_DIRT);
     private static final Set<Material> FAST_DIG = Set.of(Material.DIRT, Material.GRASS_BLOCK);
-    private static final double EXPLOSION_CHANCE = 0.08;
+    /** Mirrors SpecialPickaxeItem.EXPLOSION_SIZES / EXPLOSION_CHANCES (폭발 효과 level 0..5). */
+    private static final int[] EXPLOSION_SIZES = {0, 2, 3, 3, 4, 4};
+    private static final double[] EXPLOSION_CHANCES = {0.0, 0.05, 0.08, 0.12, 0.12, 0.16};
+    private static final float BLAST_RESISTANCE_CAP = 30f;
+    private static final double MAGNET_RADIUS = 6.0;
+    private static final double MAGNET_SPEED = 0.18;
 
     private final Random random = new Random();
+    private final JobCache jobs;
+
+    public SpecialToolListener(JobCache jobs) {
+        this.jobs = jobs;
+    }
+
+    /** Marker present AND the holder is the tagged owner currently in the tool's job. */
+    private boolean usable(Player player, ItemStack item, NamespacedKey key) {
+        return hasMarker(item, key) && jobs.canUse(player, item);
+    }
+
+    private static void denyWrongJob(Player player) {
+        player.sendMessage(Component.text("내 직업의 내 도구만 사용할 수 있습니다.", NamedTextColor.RED));
+    }
 
     private boolean hasMarker(ItemStack item, NamespacedKey key) {
         if (item == null || !item.hasItemMeta()) {
@@ -62,6 +85,21 @@ public class SpecialToolListener implements Listener {
         }
         Boolean flag = item.getItemMeta().getPersistentDataContainer().get(key, PersistentDataType.BOOLEAN);
         return Boolean.TRUE.equals(flag);
+    }
+
+    private int toolLevel(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) {
+            return 0;
+        }
+        Integer level = item.getItemMeta().getPersistentDataContainer().get(TOOL_LEVEL_KEY, PersistentDataType.INTEGER);
+        return level == null ? 0 : Math.max(0, level);
+    }
+
+    /** Mirrors SpecialHoeItem.AREA_SIZES (범위 level 0..5). */
+    private static final int[] HOE_AREA_SIZES = {1, 3, 4, 5, 6, 7};
+
+    private int hoeAreaSize(ItemStack item) {
+        return HOE_AREA_SIZES[Math.min(toolLevel(item), HOE_AREA_SIZES.length - 1)];
     }
 
     // ---------- hoe: till / harvest / fast dig ----------
@@ -80,6 +118,10 @@ public class SpecialToolListener implements Listener {
 
         if (hasMarker(hand, COMPASS_KEY)) {
             event.setCancelled(true);
+            if (!jobs.canUse(player, hand)) {
+                denyWrongJob(player);
+                return;
+            }
             handleCompassInteract(player, hand);
             return;
         }
@@ -93,7 +135,11 @@ public class SpecialToolListener implements Listener {
 
         if (hasMarker(hand, HOE_KEY)) {
             event.setCancelled(true);
-            handleHoeInteract(clicked);
+            if (!jobs.canUse(player, hand)) {
+                denyWrongJob(player);
+                return;
+            }
+            handleHoeInteract(player, hand, clicked, hoeAreaSize(hand));
         }
     }
 
@@ -169,38 +215,63 @@ public class SpecialToolListener implements Listener {
         item.setItemMeta(meta);
     }
 
-    private void handleHoeInteract(Block clicked) {
-        if (clicked.getBlockData() instanceof Ageable ageable && ageable.getAge() >= ageable.getMaximumAge()) {
-            harvest(clicked);
+    /** Same as MainCore's SpecialToolListener.handleHoeInteract minus land protection: harvest
+     * the NxN square (no replant) if a mature crop was clicked, else till it; then sow whatever
+     * seed is in the off-hand onto every free farmland block in the square. */
+    private void handleHoeInteract(Player player, ItemStack hoe, Block clicked, int size) {
+        int lo = -((size - 1) / 2);
+        int hi = size / 2;
+        boolean harvesting = isMatureCrop(clicked);
+        if (!harvesting && !TILLABLE.contains(clicked.getType()) && clicked.getType() != Material.FARMLAND
+                && !CropRules.GROWABLE.contains(clicked.getType())) {
             return;
         }
-        if (TILLABLE.contains(clicked.getType())) {
-            till3x3(clicked);
-        }
-    }
-
-    private void harvest(Block block) {
-        Material cropType = block.getType();
-        for (ItemStack drop : block.getDrops()) {
-            block.getWorld().dropItemNaturally(block.getLocation(), drop);
-        }
-        block.setType(cropType);
-    }
-
-    private void till3x3(Block center) {
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                Block b = center.getRelative(dx, 0, dz);
-                if (TILLABLE.contains(b.getType())) {
+        for (int dx = lo; dx <= hi; dx++) {
+            for (int dz = lo; dz <= hi; dz++) {
+                Block b = clicked.getRelative(dx, 0, dz);
+                if (harvesting) {
+                    if (isMatureCrop(b)) {
+                        for (ItemStack drop : CropRules.dropsWithoutSeeds(b, hoe)) {
+                            b.getWorld().dropItemNaturally(b.getLocation(), drop);
+                        }
+                        b.setType(Material.AIR, false);
+                    }
+                } else if (TILLABLE.contains(b.getType()) && b.getRelative(0, 1, 0).getType().isAir()) {
                     b.setType(Material.FARMLAND);
+                }
+            }
+        }
+
+        ItemStack offhand = player.getInventory().getItemInOffHand();
+        Material crop = CropRules.cropFor(offhand);
+        if (crop == null) {
+            return;
+        }
+        for (int dx = lo; dx <= hi && offhand.getAmount() > 0; dx++) {
+            for (int dz = lo; dz <= hi && offhand.getAmount() > 0; dz++) {
+                Block soil = clicked.getRelative(dx, 0, dz);
+                if (soil.getType() != Material.FARMLAND) {
+                    soil = soil.getRelative(0, -1, 0);
+                }
+                if (soil.getType() != Material.FARMLAND) continue;
+                Block above = soil.getRelative(0, 1, 0);
+                if (!above.getType().isAir()) continue;
+                above.setType(crop, false);
+                if (player.getGameMode() != org.bukkit.GameMode.CREATIVE) {
+                    offhand.setAmount(offhand.getAmount() - 1);
                 }
             }
         }
     }
 
+    private static boolean isMatureCrop(Block block) {
+        return CropRules.GROWABLE.contains(block.getType())
+                && block.getBlockData() instanceof Ageable ageable && ageable.getAge() >= ageable.getMaximumAge();
+    }
+
     @EventHandler(ignoreCancelled = true)
     public void onBlockDamage(BlockDamageEvent event) {
-        if (!hasMarker(event.getItemInHand(), HOE_KEY)) {
+        if (!usable(event.getPlayer(), event.getItemInHand(), HOE_KEY)) {
             return;
         }
         if (FAST_DIG.contains(event.getBlock().getType())) {
@@ -213,7 +284,7 @@ public class SpecialToolListener implements Listener {
     @EventHandler(ignoreCancelled = true)
     public void onBlockDrop(BlockDropItemEvent event) {
         Player player = event.getPlayer();
-        if (!hasMarker(player.getInventory().getItemInMainHand(), PICKAXE_KEY)) {
+        if (!usable(player, player.getInventory().getItemInMainHand(), PICKAXE_KEY)) {
             return;
         }
         for (Item itemEntity : event.getItems()) {
@@ -222,30 +293,91 @@ public class SpecialToolListener implements Listener {
         }
     }
 
+    /** Same blast as MainCore's SpecialToolListener (minus land protection): an NxNxN cube
+     * (N from EXPLOSION_SIZES, mirrors SpecialPickaxeItem.explosionSize) starting at the broken block and
+     * extending away from the player along their look axis, skipping tough blocks and the
+     * column under their feet. */
     @EventHandler(ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
         Player player = event.getPlayer();
         ItemStack tool = player.getInventory().getItemInMainHand();
-        if (!hasMarker(tool, PICKAXE_KEY)) {
+        if (!usable(player, tool, PICKAXE_KEY)) {
             return;
         }
-        if (random.nextDouble() >= EXPLOSION_CHANCE) {
-            return;
+        int level = Math.min(toolLevel(tool), EXPLOSION_SIZES.length - 1);
+        int size = EXPLOSION_SIZES[level];
+        if (size <= 0 || random.nextDouble() >= EXPLOSION_CHANCES[level]) {
+            return; // level 0 has no blast at all
         }
 
         Block origin = event.getBlock();
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    if (dx == 0 && dy == 0 && dz == 0) continue;
-                    Block target = origin.getRelative(dx, dy, dz);
-                    if (target.getType().isAir() || target.getType() == Material.BEDROCK) continue;
+        Vector facing = dominantAxis(player.getEyeLocation().getDirection());
+        int lo = -((size - 1) / 2);
+        int hi = size / 2;
+        Location feet = player.getLocation();
+
+        for (int depth = 0; depth < size; depth++) {
+            for (int a = lo; a <= hi; a++) {
+                for (int b = lo; b <= hi; b++) {
+                    Block target = blastBlock(origin, facing, depth, a, b);
+                    if (target.equals(origin)) continue;
+                    if (!isBlastable(target)) continue;
+                    if (target.getX() == feet.getBlockX() && target.getZ() == feet.getBlockZ()
+                            && target.getY() < feet.getBlockY()) {
+                        continue;
+                    }
                     target.breakNaturally(tool);
                 }
             }
         }
-        origin.getWorld().spawnParticle(Particle.EXPLOSION, origin.getLocation().add(0.5, 0.5, 0.5), 1);
+        Location center = blastBlock(origin, facing, size / 2, 0, 0).getLocation().add(0.5, 0.5, 0.5);
+        origin.getWorld().spawnParticle(Particle.EXPLOSION, center, 1);
         origin.getWorld().playSound(origin.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 1f, 1f);
+    }
+
+    private static Vector dominantAxis(Vector dir) {
+        double ax = Math.abs(dir.getX()), ay = Math.abs(dir.getY()), az = Math.abs(dir.getZ());
+        if (ax >= ay && ax >= az) return new Vector(Math.signum(dir.getX()), 0, 0);
+        if (ay >= az) return new Vector(0, Math.signum(dir.getY()), 0);
+        return new Vector(0, 0, Math.signum(dir.getZ()));
+    }
+
+    private static Block blastBlock(Block origin, Vector facing, int depth, int a, int b) {
+        if (facing.getX() != 0) {
+            return origin.getRelative(depth * (int) facing.getX(), a, b);
+        }
+        if (facing.getY() != 0) {
+            return origin.getRelative(a, depth * (int) facing.getY(), b);
+        }
+        return origin.getRelative(a, b, depth * (int) facing.getZ());
+    }
+
+    private static boolean isBlastable(Block block) {
+        Material type = block.getType();
+        if (type.isAir() || !type.isSolid()) {
+            return false;
+        }
+        return type.getBlastResistance() <= BLAST_RESISTANCE_CAP;
+    }
+
+    /** Called every other tick from ServerBridgePlugin: magnet-pickaxe holders reel in nearby
+     * dropped items. */
+    public void tickMagnetPickaxe() {
+        for (Player player : org.bukkit.Bukkit.getOnlinePlayers()) {
+            ItemStack hand = player.getInventory().getItemInMainHand();
+            if (!usable(player, hand, PICKAXE_KEY)) {
+                continue;
+            }
+            Location pull = player.getLocation().add(0, 0.8, 0);
+            for (org.bukkit.entity.Entity entity : player.getNearbyEntities(MAGNET_RADIUS, MAGNET_RADIUS, MAGNET_RADIUS)) {
+                if (!(entity instanceof Item item) || item.isDead()) continue;
+                Vector toPlayer = pull.toVector().subtract(item.getLocation().toVector());
+                double distance = toPlayer.length();
+                if (distance < 0.6 || distance > MAGNET_RADIUS) continue;
+                item.setVelocity(toPlayer.normalize().multiply(MAGNET_SPEED).setY(
+                        toPlayer.getY() > 0 ? Math.max(0.05, toPlayer.getY() / distance * MAGNET_SPEED) : 0));
+            }
+        }
     }
 
 }

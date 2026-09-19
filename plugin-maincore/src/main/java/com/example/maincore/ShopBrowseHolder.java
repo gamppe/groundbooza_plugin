@@ -15,14 +15,17 @@ public class ShopBrowseHolder implements InventoryHolder {
     public static final int PAGE_SIZE = 28; // inner 4x7 grid
 
     private final ShopCategory category;
+    /** Only set for 특수구매 (category == null): whose job list this page was built from. */
+    private final Job job;
     private final int page;
     private final boolean hasPrev;
     private final boolean hasNext;
     private final Map<Integer, Integer> slotIndex = new HashMap<>();
     private Inventory inventory;
 
-    public ShopBrowseHolder(ShopCategory category, int page, boolean hasPrev, boolean hasNext) {
+    public ShopBrowseHolder(ShopCategory category, Job job, int page, boolean hasPrev, boolean hasNext) {
         this.category = category;
+        this.job = job;
         this.page = page;
         this.hasPrev = hasPrev;
         this.hasNext = hasNext;
@@ -45,6 +48,10 @@ public class ShopBrowseHolder implements InventoryHolder {
 
     public Integer catalogIndexInSlot(int slot) {
         return slotIndex.get(slot);
+    }
+
+    public Job getJob() {
+        return job;
     }
 
     public ShopCategory getCategory() {

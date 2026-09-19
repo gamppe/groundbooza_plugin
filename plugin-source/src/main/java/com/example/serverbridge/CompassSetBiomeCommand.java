@@ -12,9 +12,11 @@ import org.bukkit.inventory.ItemStack;
 public class CompassSetBiomeCommand implements CommandExecutor {
 
     private final SpecialToolListener specialToolListener;
+    private final JobCache jobs;
 
-    public CompassSetBiomeCommand(SpecialToolListener specialToolListener) {
+    public CompassSetBiomeCommand(SpecialToolListener specialToolListener, JobCache jobs) {
         this.specialToolListener = specialToolListener;
+        this.jobs = jobs;
     }
 
     @Override
@@ -31,6 +33,10 @@ public class CompassSetBiomeCommand implements CommandExecutor {
         ItemStack hand = player.getInventory().getItemInMainHand();
         if (!specialToolListener.isSpecialCompass(hand)) {
             player.sendMessage(Component.text("나침반을 손에 들고 있어야 합니다.", NamedTextColor.RED));
+            return true;
+        }
+        if (!jobs.canUse(player, hand)) {
+            player.sendMessage(Component.text("내 직업의 내 도구만 사용할 수 있습니다.", NamedTextColor.RED));
             return true;
         }
         specialToolListener.setTargetBiome(hand, biome);

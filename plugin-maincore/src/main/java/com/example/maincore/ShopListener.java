@@ -49,6 +49,10 @@ public class ShopListener implements Listener {
             plugin.getShopController().openRoot(player);
             return;
         }
+        if (slot == ShopBuyHolder.SLOT_TERRAFORM) {
+            plugin.getTerraformController().openMenu(player);
+            return;
+        }
         ShopCategory category = ShopBuyHolder.categoryForSlot(slot);
         if (category != null) {
             plugin.getShopController().openCategory(player, category, 0);
@@ -74,11 +78,11 @@ public class ShopListener implements Listener {
             return;
         }
         if (slot == ShopBrowseHolder.SLOT_PREV && holder.hasPrev()) {
-            plugin.getShopController().openCategory(player, holder.getCategory(), holder.getPage() - 1);
+            openPage(player, holder, holder.getPage() - 1);
             return;
         }
         if (slot == ShopBrowseHolder.SLOT_NEXT && holder.hasNext()) {
-            plugin.getShopController().openCategory(player, holder.getCategory(), holder.getPage() + 1);
+            openPage(player, holder, holder.getPage() + 1);
             return;
         }
 
@@ -86,7 +90,7 @@ public class ShopListener implements Listener {
         if (index == null) {
             return;
         }
-        ShopItem item = plugin.getShopController().getItem(holder.getCategory(), index);
+        ShopItem item = plugin.getShopController().getItem(holder.getCategory(), holder.getJob(), index);
         if (item == null) {
             return;
         }
@@ -95,6 +99,15 @@ public class ShopListener implements Listener {
             return;
         }
         int quantity = event.isShiftClick() ? item.icon().getMaxStackSize() : 1;
-        plugin.getShopController().buy(player, holder.getCategory(), index, quantity);
+        plugin.getShopController().buy(player, holder.getCategory(), holder.getJob(), index, quantity);
+    }
+
+    /** 특수구매 pages re-resolve the player's job on every flip (it may have changed). */
+    private void openPage(Player player, ShopBrowseHolder holder, int page) {
+        if (holder.getCategory() == null) {
+            plugin.getShopController().openSpecialBuy(player, page);
+        } else {
+            plugin.getShopController().openCategory(player, holder.getCategory(), page);
+        }
     }
 }

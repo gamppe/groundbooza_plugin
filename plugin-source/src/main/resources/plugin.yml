@@ -10,5 +10,8 @@ commands:
   파밍이동:
     description: Switch to the linked server
     usage: /파밍이동
+  귓속말:
+    description: Whisper to a player on either server
+    usage: /귓속말 <플레이어> <메시지>
   groundbuza_compass_set_farm:
     description: Set the biome-finder compass's target biome (farm-server standalone copy)

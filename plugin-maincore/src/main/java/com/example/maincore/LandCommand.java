@@ -84,12 +84,28 @@ public class LandCommand implements CommandExecutor, TabCompleter {
     private void handleAbandon(Player player) {
         ItemStack hand = player.getInventory().getItemInMainHand();
         Integer landId = plugin.getDeedItem().getLandId(hand);
+        boolean reservation = false;
+        if (landId == null) {
+            landId = plugin.getReservationDeedItem().getLandId(hand);
+            reservation = landId != null;
+        }
         if (landId == null) {
             player.sendMessage(Component.text("포기할 땅문서를 손에 들고 입력해주세요.", NamedTextColor.RED));
             return;
         }
         MainDatabase.Land land = plugin.getLandManager().getLandById(landId);
-        if (land == null || !land.owner().equals(player.getUniqueId())) {
+        if (reservation) {
+            // A claimed 토지선점권 is "owned" by the RESERVATION_OWNER sentinel - the holder is
+            // who may give it up, and only while it's not sitting in the marketplace.
+            if (land == null || !land.reservation() || !player.getUniqueId().equals(land.holder())) {
+                player.sendMessage(Component.text("효력이 없는 땅문서입니다.", NamedTextColor.RED));
+                return;
+            }
+            if (land.owner().equals(MainDatabase.MARKET_OWNER)) {
+                player.sendMessage(Component.text("거래소에 등록된 땅은 먼저 회수한 뒤 포기할 수 있습니다.", NamedTextColor.RED));
+                return;
+            }
+        } else if (land == null || !land.owner().equals(player.getUniqueId())) {
             player.sendMessage(Component.text("효력이 없는 땅문서입니다.", NamedTextColor.RED));
             return;
         }
@@ -119,7 +135,13 @@ public class LandCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        long price = LandBuyListener.priceForNth(plugin.getLandManager().countOwned(player.getUniqueId()));
+        int owned = plugin.getLandManager().countOwned(player.getUniqueId());
+        // 건축가 gets one extra free deed: their whole price ladder is shifted down by one, so
+        // the 2nd is free too and the 3rd costs what everyone else's 2nd does.
+        if (plugin.getJobManager().hasJob(player.getUniqueId(), Job.BUILDER)) {
+            owned = Math.max(0, owned - 1);
+        }
+        long price = LandBuyListener.priceForNth(owned);
         plugin.getPendingPurchaseManager().request(player.getUniqueId(), name, price);
 
         player.sendMessage(Component.text("빈 땅문서 '" + name + "' 을 살까요? (가격: " + price + ") ", NamedTextColor.AQUA)

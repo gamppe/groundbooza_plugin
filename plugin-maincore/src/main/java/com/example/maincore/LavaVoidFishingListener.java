@@ -67,8 +67,9 @@ public class LavaVoidFishingListener implements Listener {
             return;
         }
         ItemStack hand = player.getInventory().getItemInMainHand();
-        if (plugin.getFishingRodTierItem().getTier(hand) != FishingRodTierItem.Tier.GREAT) {
-            return;
+        if (plugin.getFishingRodTierItem().getTier(hand) != FishingRodTierItem.Tier.GREAT
+                || !plugin.getJobManager().canUse(player, hand)) {
+            return; // 어부 only - a leftover rod from a previous job fishes like a plain one
         }
         tracked.put(player.getUniqueId(), new Tracked(event.getHook(), player));
     }

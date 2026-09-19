@@ -119,6 +119,37 @@ public class DatabaseManager {
         return result;
     }
 
+    /** A player's MainCore job as stored in MainCore's own schema (see config jobs-schema). */
+    public record JobProfile(String job, int u1, int u2, int u3) {
+        public int level(int track) {
+            return switch (track) {
+                case 0 -> u1;
+                case 1 -> u2;
+                case 2 -> u3;
+                default -> 0;
+            };
+        }
+    }
+
+    /** Blocking. Reads MainCore's jobs table cross-schema - the ServerBridge MySQL user needs
+     * SELECT on `<schema>.jobs`. Null if the player has no job or the query fails. */
+    public JobProfile loadJobProfile(String schema, UUID uuid) {
+        String sql = "SELECT job, upgrade_1, upgrade_2, upgrade_3 FROM `" + schema + "`.jobs WHERE uuid = ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, uuid.toString());
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return new JobProfile(rs.getString("job"), rs.getInt("upgrade_1"), rs.getInt("upgrade_2"), rs.getInt("upgrade_3"));
+                }
+            }
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Failed to read MainCore job for " + uuid + " from schema " + schema
+                    + " (does the ServerBridge MySQL user have SELECT on it?)", e);
+        }
+        return null;
+    }
+
     public void close() {
         if (dataSource != null && !dataSource.isClosed()) {
             dataSource.close();

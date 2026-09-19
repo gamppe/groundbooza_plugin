@@ -27,9 +27,16 @@ public class AbandonConfirmCommand implements CommandExecutor {
         }
         MainDatabase.Land land = plugin.getLandManager().getLandById(landId);
         String name = land != null ? land.name() : "그 땅";
+        boolean reservation = land != null && land.reservation();
 
-        plugin.getLandManager().abandonAsync(landId, () ->
-                player.sendMessage(Component.text(name + " 땅의 소유권을 포기했습니다.", NamedTextColor.YELLOW)));
+        plugin.getLandManager().abandonAsync(landId, () -> {
+            if (reservation) {
+                LandBuyListener.removeForSaleSigns(player.getWorld(), land.cellX(), land.cellZ());
+                player.sendMessage(Component.text(name + " 땅의 선점을 포기했습니다.", NamedTextColor.YELLOW));
+            } else {
+                player.sendMessage(Component.text(name + " 땅의 소유권을 포기했습니다.", NamedTextColor.YELLOW));
+            }
+        });
         return true;
     }
 }

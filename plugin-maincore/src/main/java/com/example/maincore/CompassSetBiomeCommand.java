@@ -33,6 +33,10 @@ public class CompassSetBiomeCommand implements CommandExecutor {
             player.sendMessage(Component.text("나침반을 손에 들고 있어야 합니다.", NamedTextColor.RED));
             return true;
         }
+        if (!plugin.getJobManager().canUse(player, hand)) {
+            player.sendMessage(Component.text("현재 직업으로는 사용할 수 없는 도구입니다.", NamedTextColor.RED));
+            return true;
+        }
         plugin.getCompassBiomeFinderItem().setTargetBiome(hand, biome);
         plugin.getSpecialToolListener().pointCompass(player, hand, biome);
         return true;

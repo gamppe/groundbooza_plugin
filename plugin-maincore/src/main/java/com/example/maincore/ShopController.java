@@ -5,7 +5,6 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
-import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
@@ -21,9 +20,13 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class ShopController {
 
-    private static final long RENTAL_PRICE = 10L;
     private static final long SPECIAL_PRICE = 10L;
     private static final long DYE_PRICE = 10L;
+    private static final long FREE_PRICE = 0L;
+    private static final long SEED_PRICE = 10L;
+    private static final long SPAWN_EGG_PRICE = 500L;
+    private static final long HORSE_LEAD_PRICE = 500L;
+    private static final long SADDLE_PRICE = 300L;
     private static final long RESERVATION_BASE_PRICE = 20_000L;
     private static final int MAX_RESERVATION_DEEDS = 5;
 
@@ -49,7 +52,8 @@ public class ShopController {
 
     private final MainCorePlugin plugin;
     private final Map<ShopCategory, List<ShopItem>> catalog = new EnumMap<>(ShopCategory.class);
-    private final List<ShopItem> specialCatalog = new ArrayList<>();
+    /** 특수구매 is split per job - a player only ever sees (and can buy from) their own job's list. */
+    private final Map<Job, List<ShopItem>> specialCatalogs = new EnumMap<>(Job.class);
     private final Set<UUID> pendingReservationPurchases = ConcurrentHashMap.newKeySet();
 
     public ShopController(MainCorePlugin plugin) {
@@ -57,9 +61,18 @@ public class ShopController {
         for (ShopCategory category : ShopCategory.values()) {
             catalog.put(category, new ArrayList<>());
         }
-        buildToolRentalCatalog();
-        buildSpecialCatalog();
+        for (Job job : Job.values()) {
+            specialCatalogs.put(job, new ArrayList<>());
+        }
+        buildSpecialCatalogs();
         buildDyeCatalog();
+        buildNecessitiesCatalog();
+    }
+
+    private void buildNecessitiesCatalog() {
+        HorseLeadItem leads = plugin.getHorseLeadItem();
+        catalog.get(ShopCategory.NECESSITIES).add(new ShopItem("말 보관 목줄", leads.createEmpty(), HORSE_LEAD_PRICE, leads::createEmpty));
+        addPlain(catalog.get(ShopCategory.NECESSITIES), Material.SADDLE, "안장", SADDLE_PRICE);
     }
 
     private void buildDyeCatalog() {
@@ -72,32 +85,97 @@ public class ShopController {
         }
     }
 
-    private List<ShopItem> catalogFor(ShopCategory category) {
-        return category == null ? specialCatalog : catalog.get(category);
+    /** category null = 특수구매, which needs the job to know which list to show. */
+    private List<ShopItem> catalogFor(ShopCategory category, Job job) {
+        if (category != null) {
+            return catalog.get(category);
+        }
+        return job == null ? List.of() : specialCatalogs.get(job);
     }
 
-    private void buildSpecialCatalog() {
+    private static final Map<Material, String> SEED_NAMES = new java.util.LinkedHashMap<>();
+    static {
+        SEED_NAMES.put(Material.WHEAT_SEEDS, "밀 씨앗");
+        SEED_NAMES.put(Material.BEETROOT_SEEDS, "비트 씨앗");
+        SEED_NAMES.put(Material.MELON_SEEDS, "수박씨");
+        SEED_NAMES.put(Material.PUMPKIN_SEEDS, "호박씨");
+        SEED_NAMES.put(Material.COCOA_BEANS, "코코아 콩");
+        SEED_NAMES.put(Material.SUGAR_CANE, "사탕수수");
+        SEED_NAMES.put(Material.BAMBOO, "대나무");
+        SEED_NAMES.put(Material.SWEET_BERRIES, "달콤한 열매");
+        SEED_NAMES.put(Material.NETHER_WART, "네더 와트");
+    }
+
+    private void buildSpecialCatalogs() {
         SpecialHoeItem hoe = plugin.getSpecialHoeItem();
         SpecialPickaxeItem pickaxe = plugin.getSpecialPickaxeItem();
         SpecialAxeItem axe = plugin.getSpecialAxeItem();
         FishingRodTierItem rod = plugin.getFishingRodTierItem();
         CompassBiomeFinderItem compass = plugin.getCompassBiomeFinderItem();
+        SpeedBootsItem boots = plugin.getSpeedBootsItem();
 
-        specialCatalog.add(new ShopItem("만능 개간 괭이", hoe.create(), SPECIAL_PRICE, hoe::create));
-        specialCatalog.add(new ShopItem("자석 곡괭이", pickaxe.create(), SPECIAL_PRICE, pickaxe::create));
-        specialCatalog.add(new ShopItem("지형 채우기 도끼", axe.create(), SPECIAL_PRICE, axe::create));
-        for (FishingRodTierItem.Tier tier : FishingRodTierItem.Tier.values()) {
-            specialCatalog.add(new ShopItem(tier.label, rod.create(tier), SPECIAL_PRICE, () -> rod.create(tier)));
+        // Upgradeable tools are granted at level 0 here; giveGranted() bumps them to the buyer's
+        // current upgrade level right before handing them over.
+        List<ShopItem> farmer = specialCatalogs.get(Job.FARMER);
+        farmer.add(new ShopItem("만능 개간 괭이", hoe.create(), SPECIAL_PRICE, hoe::create));
+        addPlain(farmer, Material.DIRT, "흙", FREE_PRICE);
+        addPlain(farmer, Material.OAK_FENCE, "참나무 울타리", FREE_PRICE);
+        addPlain(farmer, Material.OAK_FENCE_GATE, "참나무 울타리 문", FREE_PRICE);
+        addPlain(farmer, Material.GLOWSTONE, "발광석", FREE_PRICE);
+        for (Map.Entry<Material, String> entry : SEED_NAMES.entrySet()) {
+            addPlain(farmer, entry.getKey(), entry.getValue(), SEED_PRICE);
         }
-        specialCatalog.add(new ShopItem("바이옴 탐지 나침반", compass.create(), SPECIAL_PRICE, compass::create));
+        // Carrots/potatoes can't be planted as food - these tagged seeds are the only way.
+        CropRules crops = plugin.getCropRules();
+        for (Material crop : List.of(Material.CARROTS, Material.POTATOES)) {
+            farmer.add(new ShopItem(CropRules.seedLabel(crop), crops.createSeed(crop), SEED_PRICE, () -> crops.createSeed(crop)));
+        }
+        // Spawn eggs start on page 2: pad the rest of page 1 with empty slots (null entries are
+        // skipped by openCategory), then one egg per animal variant.
+        padToNextPage(farmer);
+        AnimalEggItem eggs = plugin.getAnimalEggItem();
+        for (AnimalEggItem.Variant variant : AnimalEggItem.all()) {
+            farmer.add(new ShopItem(variant.label() + " 스폰알", eggs.create(variant), SPAWN_EGG_PRICE, () -> eggs.create(variant)));
+        }
+
+        List<ShopItem> fisher = specialCatalogs.get(Job.FISHER);
+        addPlain(fisher, Material.FISHING_ROD, "낚시대", FREE_PRICE);
+        for (FishingRodTierItem.Tier tier : FishingRodTierItem.Tier.values()) {
+            fisher.add(new ShopItem(tier.label, rod.create(tier), SPECIAL_PRICE, () -> rod.create(tier)));
+        }
+
+        List<ShopItem> miner = specialCatalogs.get(Job.MINER);
+        miner.add(new ShopItem("자석 곡괭이", pickaxe.create(), SPECIAL_PRICE, pickaxe::create));
+        addPlain(miner, Material.TORCH, "횃불", FREE_PRICE);
+
+        List<ShopItem> builder = specialCatalogs.get(Job.BUILDER);
+        builder.add(new ShopItem("지형 채우기 도끼", axe.create(), SPECIAL_PRICE, axe::create));
+        for (Map.Entry<Material, String> entry : DYE_NAMES.entrySet()) {
+            addPlain(builder, entry.getKey(), entry.getValue(), FREE_PRICE);
+        }
+
+        List<ShopItem> adventurer = specialCatalogs.get(Job.ADVENTURER);
+        adventurer.add(new ShopItem("이동속도 신발", boots.create(), SPECIAL_PRICE, boots::create));
+        adventurer.add(new ShopItem("바이옴 탐지 나침반", compass.create(), SPECIAL_PRICE, compass::create));
 
         ReservationDeedItem reservation = plugin.getReservationDeedItem();
         // Display-only icon - id -1 never resolves to a real row, and this is never actually
         // granted (ShopListener routes clicks on it to buyReservationDeed() instead).
         MainDatabase.PendingDeed previewDeed = new MainDatabase.PendingDeed(-1, MainDatabase.RESERVATION_OWNER, null, true);
-        specialCatalog.add(new ShopItem("빈 토지선점권 문서",
+        adventurer.add(new ShopItem("빈 토지선점권 문서",
                 reservation.createBlank(previewDeed), RESERVATION_BASE_PRICE,
                 () -> reservation.createBlank(previewDeed)));
+    }
+
+    private static void padToNextPage(List<ShopItem> items) {
+        while (items.size() % ShopBrowseHolder.PAGE_SIZE != 0) {
+            items.add(null);
+        }
+    }
+
+    private void addPlain(List<ShopItem> items, Material material, String name, long price) {
+        ItemStack icon = simpleIcon(material, name, NamedTextColor.AQUA);
+        items.add(new ShopItem(name, icon, price, () -> new ItemStack(material)));
     }
 
     /** The reservation deed has its own dynamic pricing/caps, so ShopListener routes clicks on
@@ -105,6 +183,11 @@ public class ShopController {
     public void buyReservationDeed(Player player) {
         ReservationDeedItem reservation = plugin.getReservationDeedItem();
         UUID playerId = player.getUniqueId();
+
+        if (!plugin.getJobManager().hasJob(playerId, Job.ADVENTURER)) {
+            player.sendMessage(Component.text("토지선점권 문서는 모험가만 구매할 수 있습니다.", NamedTextColor.RED));
+            return;
+        }
 
         // The actual balance check/deduct happens async, so a rapid double-click can otherwise
         // fire a second purchase before the first one's item lands back in the inventory - both
@@ -171,28 +254,6 @@ public class ShopController {
         return claimed + pending;
     }
 
-    private void buildToolRentalCatalog() {
-        List<ShopItem> items = catalog.get(ShopCategory.TOOL_RENTAL);
-        addToolTrio(items, "곡괭이", Material.GOLDEN_PICKAXE, Material.IRON_PICKAXE, Material.DIAMOND_PICKAXE);
-        addToolTrio(items, "도끼", Material.GOLDEN_AXE, Material.IRON_AXE, Material.DIAMOND_AXE);
-        addToolTrio(items, "삽", Material.GOLDEN_SHOVEL, Material.IRON_SHOVEL, Material.DIAMOND_SHOVEL);
-        addToolTrio(items, "검", Material.GOLDEN_SWORD, Material.IRON_SWORD, Material.DIAMOND_SWORD);
-
-        RentalToolItem rental = plugin.getRentalToolItem();
-        items.add(new ShopItem("낚싯대", rental.createPreview(Material.FISHING_ROD, "낚싯대"), RENTAL_PRICE,
-                () -> rental.createRental(Material.FISHING_ROD, "낚싯대")));
-    }
-
-    private void addToolTrio(List<ShopItem> items, String label, Material gold, Material iron, Material diamond) {
-        RentalToolItem rental = plugin.getRentalToolItem();
-        items.add(new ShopItem("금 " + label, rental.createPreview(gold, "금 " + label), RENTAL_PRICE,
-                () -> rental.createRental(gold, "금 " + label)));
-        items.add(new ShopItem("철 " + label, rental.createPreview(iron, "철 " + label), RENTAL_PRICE,
-                () -> rental.createRental(iron, "철 " + label)));
-        items.add(new ShopItem("다이아 " + label, rental.createPreview(diamond, "다이아 " + label), RENTAL_PRICE,
-                () -> rental.createRental(diamond, "다이아 " + label)));
-    }
-
     // ---------- menus ----------
 
     public void openRoot(Player player) {
@@ -209,31 +270,39 @@ public class ShopController {
         ShopBuyHolder holder = new ShopBuyHolder();
         Inventory inv = Bukkit.createInventory(holder, ShopBuyHolder.SIZE, Component.text("상점 - 구매"));
         for (ShopCategory category : ShopCategory.values()) {
-            ItemStack icon = simpleIcon(category.icon(), category.label(), NamedTextColor.AQUA);
-            if (category == ShopCategory.TOOL_RENTAL) {
-                icon.addUnsafeEnchantment(Enchantment.EFFICIENCY, 1);
-            }
-            inv.setItem(ShopBuyHolder.slotFor(category), icon);
+            inv.setItem(ShopBuyHolder.slotFor(category), simpleIcon(category.icon(), category.label(), NamedTextColor.AQUA));
         }
+        inv.setItem(ShopBuyHolder.SLOT_TERRAFORM, simpleIcon(Material.GRASS_BLOCK, "테라포밍", NamedTextColor.GREEN));
         inv.setItem(ShopBuyHolder.SLOT_BACK, simpleIcon(Material.ARROW, "뒤로가기", NamedTextColor.YELLOW));
         holder.setInventory(inv);
         player.openInventory(inv);
     }
 
+    /** 특수구매 shows only the player's own job's list - jobless players are pointed at /직업. */
     public void openSpecialBuy(Player player, int page) {
-        openCategory(player, null, page);
+        Job job = plugin.getJobManager().getJob(player.getUniqueId());
+        if (job == null) {
+            player.closeInventory();
+            player.sendMessage(Component.text("특수구매는 직업이 있어야 이용할 수 있습니다. /직업 으로 먼저 선택하세요.", NamedTextColor.RED));
+            return;
+        }
+        openCategory(player, null, job, page);
     }
 
     public void openCategory(Player player, ShopCategory category, int page) {
-        List<ShopItem> items = catalogFor(category);
+        openCategory(player, category, null, page);
+    }
+
+    private void openCategory(Player player, ShopCategory category, Job job, int page) {
+        List<ShopItem> items = catalogFor(category, job);
         int maxPage = Math.max(0, (items.size() - 1) / ShopBrowseHolder.PAGE_SIZE);
         int clampedPage = Math.max(0, Math.min(page, maxPage));
         boolean hasPrev = clampedPage > 0;
         boolean hasNext = (clampedPage + 1) * ShopBrowseHolder.PAGE_SIZE < items.size();
 
-        ShopBrowseHolder holder = new ShopBrowseHolder(category, clampedPage, hasPrev, hasNext);
+        ShopBrowseHolder holder = new ShopBrowseHolder(category, job, clampedPage, hasPrev, hasNext);
         int totalPages = maxPage + 1;
-        String label = category == null ? "특수구매" : category.label();
+        String label = category == null ? job.label() + " 특수구매" : category.label();
         String title = "상점 - " + label + " (" + (clampedPage + 1) + " / " + totalPages + "페이지)";
         Inventory inv = Bukkit.createInventory(holder, ShopBrowseHolder.SIZE, Component.text(title));
 
@@ -249,6 +318,9 @@ public class ShopController {
         int start = clampedPage * ShopBrowseHolder.PAGE_SIZE;
         for (int i = 0; i < inner.length && start + i < items.size(); i++) {
             ShopItem item = items.get(start + i);
+            if (item == null) {
+                continue; // page-break padding
+            }
             inv.setItem(inner[i], buildDisplayItem(item));
             holder.put(inner[i], start + i);
         }
@@ -283,8 +355,8 @@ public class ShopController {
     // ---------- buying ----------
 
     /** Null if the index is out of range (item removed from a catalog while a menu was open). */
-    public ShopItem getItem(ShopCategory category, int index) {
-        List<ShopItem> items = catalogFor(category);
+    public ShopItem getItem(ShopCategory category, Job job, int index) {
+        List<ShopItem> items = catalogFor(category, job);
         if (index < 0 || index >= items.size()) {
             return null;
         }
@@ -293,21 +365,29 @@ public class ShopController {
 
     /** Left-click buys 1; shift-click buys a full stack's worth (see ShopListener). Shop items
      * buy immediately - no chat confirmation, unlike the player-run-marketplace. */
-    public void buy(Player player, ShopCategory category, int index, int quantity) {
-        ShopItem item = getItem(category, index);
+    public void buy(Player player, ShopCategory category, Job job, int index, int quantity) {
+        // A 특수구매 menu opened under one job must not keep working after a job change.
+        if (category == null && !plugin.getJobManager().hasJob(player.getUniqueId(), job)) {
+            player.closeInventory();
+            player.sendMessage(Component.text("현재 직업으로는 구매할 수 없는 상품입니다.", NamedTextColor.RED));
+            return;
+        }
+        ShopItem item = getItem(category, job, index);
         if (item == null) {
             player.sendMessage(Component.text("존재하지 않는 상품입니다.", NamedTextColor.RED));
             return;
         }
         int amount = Math.max(1, quantity);
 
-        if (category == ShopCategory.TOOL_RENTAL && amount == 1 && plugin.getRentalVoucherItem().consumeOne(player)) {
-            giveGranted(player, item);
-            player.sendMessage(Component.text("도구 대여권을 사용해 " + item.name() + "을(를) 대여했습니다.", NamedTextColor.GREEN));
+        long totalPrice = item.price() * amount;
+        if (totalPrice == 0) {
+            // Free job perks (흙, 횃불, 염료...) skip the balance round-trip entirely.
+            for (int i = 0; i < amount; i++) {
+                giveGranted(player, item);
+            }
+            player.sendMessage(Component.text(amount + "개의 " + item.name() + "을(를) 받았습니다!", NamedTextColor.GREEN));
             return;
         }
-
-        long totalPrice = item.price() * amount;
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             long balance = plugin.getMainDatabase().getBalance(player.getUniqueId());
             if (balance < totalPrice) {
@@ -330,12 +410,15 @@ public class ShopController {
         });
     }
 
-    /** Hands over a freshly-granted copy of a shop item, tagging tool-type items (rental +
-     * special tools) with the buyer as their sole legitimate owner. */
+    /** Hands over a freshly-granted copy of a shop item, tagging special tools with the buyer as
+     * their sole legitimate owner, and stamping job tools with the buyer's current upgrade level. */
     private void giveGranted(Player player, ShopItem item) {
         ItemStack granted = item.grant().get();
         if (plugin.isOwnerLockedTool(granted)) {
             plugin.tagToolOwner(granted, player.getUniqueId());
+        }
+        if (plugin.getJobManager().toolJob(granted) != null) {
+            plugin.getJobManager().applyLevel(granted, plugin.getJobManager().getItemLevel(player.getUniqueId()));
         }
         player.getInventory().addItem(granted);
     }
