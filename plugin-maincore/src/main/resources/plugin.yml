@@ -1,0 +1,65 @@
+name: MainCore
+version: 1.0.0
+main: com.example.maincore.MainCorePlugin
+api-version: '26.2'
+author: MainCore
+commands:
+  땅:
+    description: Land purchase and deed storage
+    usage: /땅 <구매|문서> [이름]
+  크레딧:
+    description: Check or withdraw your credit balance
+    usage: /크레딧 [숫자]
+  크레딧지급:
+    description: Grant credits to a player (OP only)
+    usage: /크레딧지급 <닉네임> <액수>
+    permission: maincore.creditgive
+    permission-message: Unknown command. Type "/help" for help.
+  거래:
+    description: Trade items with another player
+    usage: /거래 [닉네임|품목확인|수락|거절|차단]
+  도움말:
+    description: List MainCore commands
+    usage: /도움말
+  groundbuza_deed_tp_confirm:
+    description: Confirm a pending land teleport
+  groundbuza_deed_tp_cancel:
+    description: Cancel a pending land teleport
+  groundbuza_land_abandon_confirm:
+    description: Confirm abandoning land ownership
+  groundbuza_land_abandon_cancel:
+    description: Cancel abandoning land ownership
+  groundbuza_land_buy_confirm:
+    description: Confirm buying a blank deed
+  groundbuza_land_buy_cancel:
+    description: Cancel buying a blank deed
+  pvp:
+    description: Toggle land-entity and pet combat protection (OP only)
+    permission: maincore.pvp
+    permission-message: Unknown command. Type "/help" for help.
+  groundbuza_market_buy_confirm:
+    description: Confirm a market purchase
+  groundbuza_market_buy_cancel:
+    description: Cancel a market purchase
+  거래소:
+    description: Open the marketplace (same as /거래 거래소)
+  초보자팩:
+    description: Re-give the new-player starter kit (OP only, for debugging)
+    permission: maincore.starterkit
+    permission-message: Unknown command. Type "/help" for help.
+  상점:
+    description: Open the server shop
+    usage: /상점
+  groundbuza_compass_set:
+    description: Set the biome-finder compass's target biome
+
+permissions:
+  maincore.creditgive:
+    description: Allows granting credits to players
+    default: op
+  maincore.pvp:
+    description: Allows toggling land-entity/pet combat protection
+    default: op
+  maincore.starterkit:
+    description: Allows re-giving the starter kit for debugging
+    default: op

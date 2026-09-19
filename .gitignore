@@ -1,0 +1,15 @@
+# --- 서버 런타임 (jar, 월드, 로그, 설정 등) ---
+main-server/
+farm-server/
+velocity/
+
+# --- Maven 빌드 산출물 ---
+target/
+dependency-reduced-pom.xml
+
+# --- IDE / OS ---
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db

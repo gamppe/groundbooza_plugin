@@ -1,0 +1,14 @@
+name: ServerBridge
+version: 1.0.0
+main: com.example.serverbridge.ServerBridgePlugin
+api-version: '26.2'
+author: ServerBridge
+commands:
+  파밍상자:
+    description: Open your shared personal box
+    usage: /파밍상자
+  파밍이동:
+    description: Switch to the linked server
+    usage: /파밍이동
+  groundbuza_compass_set_farm:
+    description: Set the biome-finder compass's target biome (farm-server standalone copy)

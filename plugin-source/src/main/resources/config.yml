@@ -1,0 +1,15 @@
+# MySQL connection - both servers must point at the SAME database
+mysql:
+  host: 127.0.0.1
+  port: 3306
+  database: mc_serverbridge
+  user: root
+  password: "CHANGE_ME"
+
+# Which server /파밍이동 sends the player to.
+# Set to "farm" on main-server, and "main" on farm-server.
+target-server: "farm"
+
+box:
+  size: 27
+  title: "개인 상자"
