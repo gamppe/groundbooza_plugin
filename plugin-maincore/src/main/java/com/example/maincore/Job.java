@@ -15,7 +15,7 @@ public enum Job {
             "만능 개간 괭이 / 행운 / 기우제"),
             List.of(
                     UpgradeTrack.of("행운", Material.RABBIT_FOOT,
-                            List.of("작물 수확과 동물 처치 시 드롭이 2배가 될 확률이 붙습니다", "(플레이어에게 붙는 효과)"),
+                            List.of("작물 수확 시 드롭이 2배가 될 확률이 붙습니다", "동물 먹이 효과의 확률도 올라갑니다", "(플레이어에게 붙는 효과)"),
                             level -> level == 0 ? "없음" : "2배 드롭 " + Math.round(FarmerAbilities.luckChance(level) * 100) + "%"),
                     UpgradeTrack.of("범위 업그레이드", Material.GOLDEN_HOE,
                             List.of("만능 개간 괭이의 개간/심기/수확 범위가 넓어집니다", "(들고 있는 괭이에 바로 적용)"),

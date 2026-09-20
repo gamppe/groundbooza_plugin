@@ -13,13 +13,11 @@ import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.Ageable;
-import org.bukkit.entity.Animals;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockDropItemEvent;
-import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerToggleSneakEvent;
 import org.bukkit.inventory.ItemStack;
@@ -31,14 +29,14 @@ import java.util.Random;
 import java.util.UUID;
 
 /**
- * 농부's two non-item upgrade tracks. 행운: a chance for crop harvests and animal kills to drop
- * double. 기우제 (rain dance): crouch and jump 5 times (rain particles on each hop) to grow every
+ * 농부's two non-item upgrade tracks. 행운: a chance for crop harvests to drop double (and a
+ * bonus on every AnimalFeeding roll). 기우제 (rain dance): crouch and jump 5 times (rain particles on each hop) to grow every
  * crop in the land cell you're standing in by one stage; un-crouching or pausing 3s between
  * jumps cancels. Cooldown lives in the player's PDC like the miner teleport.
  */
 public class FarmerAbilities implements Listener {
 
-    public static final double LUCK_CHANCE_PER_LEVEL = 0.1;
+    public static final double LUCK_CHANCE_PER_LEVEL = 0.2;
     public static final int RAIN_JUMPS = 5;
     public static final long RAIN_JUMP_TIMEOUT_MILLIS = 3_000L;
     public static final int RAIN_BASE_COOLDOWN_MIN = 30;
@@ -98,20 +96,6 @@ public class FarmerAbilities implements Listener {
             ItemStack stack = item.getItemStack();
             stack.setAmount(Math.min(stack.getMaxStackSize(), stack.getAmount() * 2));
             item.setItemStack(stack);
-        }
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onAnimalDeath(EntityDeathEvent event) {
-        if (!(event.getEntity() instanceof Animals) || event.getEntity().getKiller() == null) {
-            return;
-        }
-        double chance = luckChance(trackLevel(event.getEntity().getKiller(), 0));
-        if (chance <= 0 || random.nextDouble() >= chance) {
-            return;
-        }
-        for (ItemStack drop : event.getDrops()) {
-            drop.setAmount(Math.min(drop.getMaxStackSize(), drop.getAmount() * 2));
         }
     }
 

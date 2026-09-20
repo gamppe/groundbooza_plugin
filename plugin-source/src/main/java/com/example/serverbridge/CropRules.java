@@ -11,8 +11,10 @@ import org.bukkit.event.block.BlockDropItemEvent;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityInteractEvent;
+import org.bukkit.event.entity.ItemSpawnEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.persistence.PersistentDataType;
 
 import java.util.ArrayList;
@@ -31,6 +33,13 @@ import java.util.Set;
 public class CropRules implements Listener {
 
     private static final NamespacedKey SEED_CROP_KEY = new NamespacedKey("maincore", "crop_seed");
+    private static final String SPAWN_OK = "maincore_seed_ok";
+
+    private final ServerBridgePlugin plugin;
+
+    public CropRules(ServerBridgePlugin plugin) {
+        this.plugin = plugin;
+    }
 
     public static final Set<Material> SEED_ITEMS = EnumSet.of(
             Material.WHEAT_SEEDS, Material.BEETROOT_SEEDS, Material.MELON_SEEDS, Material.PUMPKIN_SEEDS,
@@ -74,10 +83,26 @@ public class CropRules implements Listener {
     public void onBlockDrop(BlockDropItemEvent event) {
         Iterator<Item> it = event.getItems().iterator();
         while (it.hasNext()) {
-            if (SEED_ITEMS.contains(it.next().getItemStack().getType())) {
+            Item item = it.next();
+            if (SEED_ITEMS.contains(item.getItemStack().getType())) {
                 it.remove();
+            } else {
+                item.setMetadata(SPAWN_OK, new FixedMetadataValue(plugin, true));
             }
         }
+    }
+
+    /** Mirrors MainCore: seeds only enter the world thrown by a player or via onBlockDrop. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onItemSpawn(ItemSpawnEvent event) {
+        Item item = event.getEntity();
+        if (!SEED_ITEMS.contains(item.getItemStack().getType())) {
+            return;
+        }
+        if (item.getThrower() != null || item.hasMetadata(SPAWN_OK)) {
+            return;
+        }
+        event.setCancelled(true);
     }
 
     @EventHandler(ignoreCancelled = true)

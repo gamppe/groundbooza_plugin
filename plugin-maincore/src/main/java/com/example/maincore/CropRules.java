@@ -14,9 +14,11 @@ import org.bukkit.event.block.BlockDropItemEvent;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityInteractEvent;
+import org.bukkit.event.entity.ItemSpawnEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.persistence.PersistentDataType;
 
 import java.util.ArrayList;
@@ -55,6 +57,8 @@ public class CropRules implements Listener {
             Material.WHEAT, Material.CARROTS, Material.POTATOES, Material.BEETROOTS,
             Material.MELON_STEM, Material.PUMPKIN_STEM, Material.TORCHFLOWER_CROP, Material.PITCHER_CROP,
             Material.NETHER_WART, Material.COCOA, Material.SWEET_BERRY_BUSH);
+
+    private static final String SPAWN_OK = "maincore_seed_ok";
 
     private final MainCorePlugin plugin;
     private final NamespacedKey seedCropKey;
@@ -108,15 +112,35 @@ public class CropRules implements Listener {
     // ---------- events ----------
 
     /** Strips seed items out of every player-caused block drop (crops, grass, ferns...). Runs
-     * early so later listeners (농부's 행운) only ever see the filtered list. */
+     * early so later listeners (농부's 행운) only ever see the filtered list. Everything that
+     * survives is marked so onItemSpawn lets it through (a chest's contents, say). */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onBlockDrop(BlockDropItemEvent event) {
         Iterator<Item> it = event.getItems().iterator();
         while (it.hasNext()) {
-            if (SEED_ITEMS.contains(it.next().getItemStack().getType())) {
+            Item item = it.next();
+            if (SEED_ITEMS.contains(item.getItemStack().getType())) {
                 it.remove();
+            } else {
+                item.setMetadata(SPAWN_OK, new FixedMetadataValue(plugin, true));
             }
         }
+    }
+
+    /** The real gate: a seed item may only ever appear in the world if a player threw it
+     * (inventory drop, death drop → thrower is set) or it came through onBlockDrop above.
+     * Anything else - grass washed out by water, pushed by a piston, blown up, popped off a
+     * removed block, dug up by a sniffer, spat by a dispenser - is silently discarded. */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onItemSpawn(ItemSpawnEvent event) {
+        Item item = event.getEntity();
+        if (!SEED_ITEMS.contains(item.getItemStack().getType())) {
+            return;
+        }
+        if (item.getThrower() != null || item.hasMetadata(SPAWN_OK)) {
+            return;
+        }
+        event.setCancelled(true);
     }
 
     @EventHandler(ignoreCancelled = true)

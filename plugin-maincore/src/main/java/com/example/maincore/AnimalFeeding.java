@@ -42,11 +42,16 @@ import java.util.Random;
  */
 public class AnimalFeeding implements Listener {
 
-    public static final long FEED_COOLDOWN_MILLIS = 24 * 60 * 60_000L;
-    public static final double COW_EXTRA_MILK_CHANCE = 0.10;
+    /** One meal per Minecraft day (world day number = full time / 24000), so sleeping through
+     * the night resets it just like anything else that happens "tomorrow". */
+    private static final long TICKS_PER_DAY = 24_000L;
+    /** Second milking: 0% on its own, +20% per 행운 level added (like the pig). */
+    public static final double COW_EXTRA_MILK_CHANCE = 0.0;
     public static final double CHICKEN_FEATHER_CHANCE = 0.20;
     public static final double HORSE_UPGRADE_CHANCE = 0.30;
     public static final double RABBIT_FOOT_CHANCE = 0.10;
+    /** Second truffle: 0% on its own, +20% per 행운 level *added* (not multiplied like the rest). */
+    public static final double PIG_EXTRA_TRUFFLE_CHANCE = 0.0;
 
     public static final double HORSE_MIN_SPEED = 0.1125;
     public static final double HORSE_MAX_SPEED = 0.3375;
@@ -63,7 +68,7 @@ public class AnimalFeeding implements Listener {
 
     public AnimalFeeding(MainCorePlugin plugin) {
         this.plugin = plugin;
-        this.fedAtKey = new NamespacedKey(plugin, "fed_at");
+        this.fedAtKey = new NamespacedKey(plugin, "fed_day");
         this.milkChargesKey = new NamespacedKey(plugin, "milk_charges");
         this.truffleKey = new NamespacedKey(plugin, "truffle");
     }
@@ -114,14 +119,13 @@ public class AnimalFeeding implements Listener {
         if (event.getHand() != EquipmentSlot.HAND) {
             return; // the main-hand event already handled it
         }
-        long now = System.currentTimeMillis();
-        long fedAt = animal.getPersistentDataContainer().getOrDefault(fedAtKey, PersistentDataType.LONG, 0L);
-        if (now - fedAt < FEED_COOLDOWN_MILLIS) {
-            long hoursLeft = (fedAt + FEED_COOLDOWN_MILLIS - now + 3_599_999L) / 3_600_000L;
-            player.sendActionBar(Component.text("오늘은 이미 먹이를 먹었습니다. (" + hoursLeft + "시간 후)", NamedTextColor.GRAY));
+        long today = animal.getWorld().getFullTime() / TICKS_PER_DAY;
+        long fedDay = animal.getPersistentDataContainer().getOrDefault(fedAtKey, PersistentDataType.LONG, Long.MIN_VALUE);
+        if (fedDay == today) {
+            player.sendActionBar(Component.text("오늘은 이미 먹이를 먹었습니다. 내일 다시 주세요.", NamedTextColor.GRAY));
             return;
         }
-        animal.getPersistentDataContainer().set(fedAtKey, PersistentDataType.LONG, now);
+        animal.getPersistentDataContainer().set(fedAtKey, PersistentDataType.LONG, today);
         if (player.getGameMode() != GameMode.CREATIVE) {
             hand.setAmount(hand.getAmount() - 1);
         }
@@ -130,21 +134,31 @@ public class AnimalFeeding implements Listener {
         applyMeal(player, animal);
     }
 
-    /** 행운 scales every chance multiplicatively: base × (1 + 10% × level). */
-    private boolean roll(Player player, double baseChance) {
+    private double luck(Player player) {
         MainDatabase.JobProfile profile = plugin.getJobManager().getProfile(player.getUniqueId());
-        double luck = profile != null && profile.job() == Job.FARMER ? FarmerAbilities.luckChance(profile.level(0)) : 0;
-        return random.nextDouble() < baseChance * (1 + luck);
+        return profile != null && profile.job() == Job.FARMER ? FarmerAbilities.luckChance(profile.level(0)) : 0;
+    }
+
+    /** 행운 scales every chance multiplicatively: base × (1 + 20% × level). */
+    private boolean roll(Player player, double baseChance) {
+        return random.nextDouble() < baseChance * (1 + luck(player));
+    }
+
+    /** Additive variant: base + 20% × level (used where the base is 0). */
+    private boolean rollAdditive(Player player, double baseChance) {
+        return random.nextDouble() < baseChance + luck(player);
     }
 
     private void applyMeal(Player player, Animals animal) {
         if (animal instanceof Cow cow) {
-            int charges = 1 + (roll(player, COW_EXTRA_MILK_CHANCE) ? 1 : 0);
+            int charges = 1 + (rollAdditive(player, COW_EXTRA_MILK_CHANCE) ? 1 : 0);
             cow.getPersistentDataContainer().set(milkChargesKey, PersistentDataType.INTEGER, charges);
             player.sendMessage(Component.text("우유를 짤 수 있을 것 같습니다.", NamedTextColor.GREEN));
         } else if (animal instanceof Pig) {
-            give(player, animal, createTruffle());
-            player.sendMessage(Component.text("돼지가 트러플을 찾아냈습니다!", NamedTextColor.GREEN));
+            int truffles = 1 + (rollAdditive(player, PIG_EXTRA_TRUFFLE_CHANCE) ? 1 : 0);
+            give(player, animal, createTruffle(truffles));
+            player.sendMessage(Component.text(truffles > 1 ? "돼지가 트러플을 2개나 찾아냈습니다!" : "돼지가 트러플을 찾아냈습니다!",
+                    NamedTextColor.GREEN));
         } else if (animal instanceof Sheep sheep) {
             sheep.setSheared(false);
             player.sendMessage(Component.text("양털이 다시 자랐습니다.", NamedTextColor.GREEN));
@@ -226,7 +240,11 @@ public class AnimalFeeding implements Listener {
     // ---------- truffle ----------
 
     public ItemStack createTruffle() {
-        ItemStack item = new ItemStack(Material.BROWN_MUSHROOM);
+        return createTruffle(1);
+    }
+
+    public ItemStack createTruffle(int amount) {
+        ItemStack item = new ItemStack(Material.BROWN_MUSHROOM, amount);
         ItemMeta meta = item.getItemMeta();
         meta.displayName(Component.text("트러플", NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
         meta.lore(List.of(

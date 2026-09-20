@@ -5,10 +5,12 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataType;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -27,7 +29,11 @@ public class ShopController {
     private static final long SPAWN_EGG_PRICE = 500L;
     private static final long HORSE_LEAD_PRICE = 500L;
     private static final long SADDLE_PRICE = 300L;
-    private static final long RESERVATION_BASE_PRICE = 20_000L;
+    private static final long DYEABLE_BLOCK_PRICE = 10L;
+    /** Flat price - the old 2^n ladder is gone; the anti-hoarding lever is now the purchase
+     * cooldown (one deed per RESERVATION_COOLDOWN_MILLIS of real time, per player). */
+    private static final long RESERVATION_PRICE = 30_000L;
+    private static final long RESERVATION_COOLDOWN_MILLIS = 3 * 60 * 60_000L;
     private static final int MAX_RESERVATION_DEEDS = 5;
 
     private static final Map<Material, String> DYE_NAMES = new java.util.LinkedHashMap<>();
@@ -51,6 +57,7 @@ public class ShopController {
     }
 
     private final MainCorePlugin plugin;
+    private final NamespacedKey reservationBuyKey;
     private final Map<ShopCategory, List<ShopItem>> catalog = new EnumMap<>(ShopCategory.class);
     /** 특수구매 is split per job - a player only ever sees (and can buy from) their own job's list. */
     private final Map<Job, List<ShopItem>> specialCatalogs = new EnumMap<>(Job.class);
@@ -58,6 +65,7 @@ public class ShopController {
 
     public ShopController(MainCorePlugin plugin) {
         this.plugin = plugin;
+        this.reservationBuyKey = new NamespacedKey(plugin, "reservation_last_buy");
         for (ShopCategory category : ShopCategory.values()) {
             catalog.put(category, new ArrayList<>());
         }
@@ -66,6 +74,7 @@ public class ShopController {
         }
         buildSpecialCatalogs();
         buildDyeCatalog();
+        buildDyeableBlockCatalog();
         buildNecessitiesCatalog();
     }
 
@@ -73,6 +82,13 @@ public class ShopController {
         HorseLeadItem leads = plugin.getHorseLeadItem();
         catalog.get(ShopCategory.NECESSITIES).add(new ShopItem("말 보관 목줄", leads.createEmpty(), HORSE_LEAD_PRICE, leads::createEmpty));
         addPlain(catalog.get(ShopCategory.NECESSITIES), Material.SADDLE, "안장", SADDLE_PRICE);
+    }
+
+    /** Every dyeable family in white - DyeRecipes guarantees each can be recoloured 1:1. */
+    private void buildDyeableBlockCatalog() {
+        for (Map.Entry<Material, String> entry : DyeRecipes.WHITE_BLOCKS.entrySet()) {
+            addPlain(catalog.get(ShopCategory.DYEABLE_BLOCK), entry.getKey(), entry.getValue(), DYEABLE_BLOCK_PRICE);
+        }
     }
 
     private void buildDyeCatalog() {
@@ -163,7 +179,7 @@ public class ShopController {
         // granted (ShopListener routes clicks on it to buyReservationDeed() instead).
         MainDatabase.PendingDeed previewDeed = new MainDatabase.PendingDeed(-1, MainDatabase.RESERVATION_OWNER, null, true);
         adventurer.add(new ShopItem("빈 토지선점권 문서",
-                reservation.createBlank(previewDeed), RESERVATION_BASE_PRICE,
+                reservation.createBlank(previewDeed), RESERVATION_PRICE,
                 () -> reservation.createBlank(previewDeed)));
     }
 
@@ -197,6 +213,16 @@ public class ShopController {
             return;
         }
 
+        long now = System.currentTimeMillis();
+        long lastBuy = player.getPersistentDataContainer().getOrDefault(reservationBuyKey, PersistentDataType.LONG, 0L);
+        if (now - lastBuy < RESERVATION_COOLDOWN_MILLIS) {
+            pendingReservationPurchases.remove(playerId);
+            long minutesLeft = (lastBuy + RESERVATION_COOLDOWN_MILLIS - now + 59_999L) / 60_000L;
+            player.sendMessage(Component.text(String.format("토지선점권 문서는 3시간에 1개만 구매할 수 있습니다. (%d시간 %d분 후)",
+                    minutesLeft / 60, minutesLeft % 60), NamedTextColor.RED));
+            return;
+        }
+
         int held = countHeldReservationDeeds(player);
         if (held >= MAX_RESERVATION_DEEDS) {
             pendingReservationPurchases.remove(playerId);
@@ -211,7 +237,7 @@ public class ShopController {
             return;
         }
 
-        long price = RESERVATION_BASE_PRICE * (1L << held);
+        long price = RESERVATION_PRICE;
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             long balance = plugin.getMainDatabase().getBalance(playerId);
             if (balance < price) {
@@ -234,9 +260,10 @@ public class ShopController {
                         pendingReservationPurchases.remove(playerId);
                         return;
                     }
+                    player.getPersistentDataContainer().set(reservationBuyKey, PersistentDataType.LONG, System.currentTimeMillis());
                     player.getInventory().addItem(reservation.createBlank(deed));
                     player.sendMessage(Component.text(
-                            "빈 토지선점권 문서를 구매했습니다. (가격: " + String.format("%,d", price) + "크레딧)", NamedTextColor.GREEN));
+                            "빈 토지선점권 문서를 구매했습니다. (가격: " + String.format("%,d", price) + "크레딧, 다음 구매는 3시간 후)", NamedTextColor.GREEN));
                     pendingReservationPurchases.remove(playerId);
                 });
             });

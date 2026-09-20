@@ -157,6 +157,13 @@ public class MainCorePlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(farmerAbilities, this);
         getServer().getPluginManager().registerEvents(animalFeeding, this);
         getServer().getPluginManager().registerEvents(new HorseLeadListener(this), this);
+        getServer().getPluginManager().registerEvents(new NoEnchantListener(this::isOwnerLockedTool), this);
+        DyeRecipes dyeRecipes = new DyeRecipes(this);
+        getServer().getPluginManager().registerEvents(dyeRecipes, this);
+        dyeRecipes.register();
+        WoodRecipes woodRecipes = new WoodRecipes(this);
+        getServer().getPluginManager().registerEvents(woodRecipes, this);
+        woodRecipes.register();
         Bukkit.getScheduler().runTaskTimer(this, farmerAbilities::tick, 1L, 5L);
         getServer().getPluginManager().registerEvents(new TerraformListener(this), this);
         TerraformConfirmCommand terraformConfirmCommand = new TerraformConfirmCommand(this);

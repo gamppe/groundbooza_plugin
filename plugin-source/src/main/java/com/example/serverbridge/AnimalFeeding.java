@@ -40,17 +40,18 @@ import java.util.Random;
  */
 public class AnimalFeeding implements Listener {
 
-    private static final long FEED_COOLDOWN_MILLIS = 24 * 60 * 60_000L;
-    private static final double COW_EXTRA_MILK_CHANCE = 0.10;
+    private static final long TICKS_PER_DAY = 24_000L;
+    private static final double COW_EXTRA_MILK_CHANCE = 0.0; // + 행운 (additive)
     private static final double CHICKEN_FEATHER_CHANCE = 0.20;
     private static final double HORSE_UPGRADE_CHANCE = 0.30;
     private static final double RABBIT_FOOT_CHANCE = 0.10;
+    private static final double PIG_EXTRA_TRUFFLE_CHANCE = 0.0; // + 행운 (additive)
     private static final double HORSE_MAX_SPEED = 0.3375;
     private static final double HORSE_SPEED_STEP = 0.0225;
     private static final double HORSE_MAX_JUMP = 1.0;
     private static final double HORSE_JUMP_STEP = 0.06;
 
-    private static final NamespacedKey FED_AT_KEY = new NamespacedKey("maincore", "fed_at");
+    private static final NamespacedKey FED_AT_KEY = new NamespacedKey("maincore", "fed_day");
     private static final NamespacedKey MILK_CHARGES_KEY = new NamespacedKey("maincore", "milk_charges");
     private static final NamespacedKey TRUFFLE_KEY = new NamespacedKey("maincore", "truffle");
 
@@ -114,14 +115,13 @@ public class AnimalFeeding implements Listener {
         if (event.getHand() != EquipmentSlot.HAND) {
             return;
         }
-        long now = System.currentTimeMillis();
-        long fedAt = animal.getPersistentDataContainer().getOrDefault(FED_AT_KEY, PersistentDataType.LONG, 0L);
-        if (now - fedAt < FEED_COOLDOWN_MILLIS) {
-            long hoursLeft = (fedAt + FEED_COOLDOWN_MILLIS - now + 3_599_999L) / 3_600_000L;
-            player.sendActionBar(Component.text("오늘은 이미 먹이를 먹었습니다. (" + hoursLeft + "시간 후)", NamedTextColor.GRAY));
+        long today = animal.getWorld().getFullTime() / TICKS_PER_DAY;
+        long fedDay = animal.getPersistentDataContainer().getOrDefault(FED_AT_KEY, PersistentDataType.LONG, Long.MIN_VALUE);
+        if (fedDay == today) {
+            player.sendActionBar(Component.text("오늘은 이미 먹이를 먹었습니다. 내일 다시 주세요.", NamedTextColor.GRAY));
             return;
         }
-        animal.getPersistentDataContainer().set(FED_AT_KEY, PersistentDataType.LONG, now);
+        animal.getPersistentDataContainer().set(FED_AT_KEY, PersistentDataType.LONG, today);
         if (player.getGameMode() != GameMode.CREATIVE) {
             hand.setAmount(hand.getAmount() - 1);
         }
@@ -134,14 +134,22 @@ public class AnimalFeeding implements Listener {
         return random.nextDouble() < chance * farmer.luckMultiplier(player);
     }
 
+    private boolean rollAdditive(Player player, double chance) {
+        return random.nextDouble() < chance + (farmer.luckMultiplier(player) - 1);
+    }
+
     private void applyMeal(Player player, Animals animal) {
         if (animal instanceof Cow cow) {
-            int charges = 1 + (roll(player, COW_EXTRA_MILK_CHANCE) ? 1 : 0);
+            int charges = 1 + (rollAdditive(player, COW_EXTRA_MILK_CHANCE) ? 1 : 0);
             cow.getPersistentDataContainer().set(MILK_CHARGES_KEY, PersistentDataType.INTEGER, charges);
             player.sendMessage(Component.text("우유를 짤 수 있을 것 같습니다.", NamedTextColor.GREEN));
         } else if (animal instanceof Pig) {
-            give(player, animal, createTruffle());
-            player.sendMessage(Component.text("돼지가 트러플을 찾아냈습니다!", NamedTextColor.GREEN));
+            int truffles = 1 + (rollAdditive(player, PIG_EXTRA_TRUFFLE_CHANCE) ? 1 : 0);
+            ItemStack truffle = createTruffle();
+            truffle.setAmount(truffles);
+            give(player, animal, truffle);
+            player.sendMessage(Component.text(truffles > 1 ? "돼지가 트러플을 2개나 찾아냈습니다!" : "돼지가 트러플을 찾아냈습니다!",
+                    NamedTextColor.GREEN));
         } else if (animal instanceof Sheep sheep) {
             sheep.setSheared(false);
             player.sendMessage(Component.text("양털이 다시 자랐습니다.", NamedTextColor.GREEN));

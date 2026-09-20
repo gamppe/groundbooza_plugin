@@ -12,13 +12,11 @@ import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.Ageable;
-import org.bukkit.entity.Animals;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockDropItemEvent;
-import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerToggleSneakEvent;
 import org.bukkit.inventory.ItemStack;
@@ -29,11 +27,11 @@ import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 
-/** Farm-server copy of MainCore's FarmerAbilities (행운 double drops + 기우제). There's no land
+/** Farm-server copy of MainCore's FarmerAbilities (행운 double crop drops + 기우제). There's no land
  * system here, so 기우제 just uses the same 48x48 grid cell math with no ownership check. */
 public class FarmerAbilities implements Listener {
 
-    private static final double LUCK_CHANCE_PER_LEVEL = 0.1;
+    private static final double LUCK_CHANCE_PER_LEVEL = 0.2;
     private static final int RAIN_JUMPS = 5;
     private static final long RAIN_JUMP_TIMEOUT_MILLIS = 3_000L;
     private static final int RAIN_BASE_COOLDOWN_MIN = 30;
@@ -58,7 +56,7 @@ public class FarmerAbilities implements Listener {
         this.jobs = jobs;
     }
 
-    /** 행운 multiplier for other systems (AnimalFeeding): 1 + 10% × level. */
+    /** 행운 multiplier for other systems (AnimalFeeding): 1 + 20% × level. */
     public double luckMultiplier(Player player) {
         return 1 + LUCK_CHANCE_PER_LEVEL * jobs.level(player.getUniqueId(), JobCache.FARMER, 0);
     }
@@ -83,20 +81,6 @@ public class FarmerAbilities implements Listener {
             ItemStack stack = item.getItemStack();
             stack.setAmount(Math.min(stack.getMaxStackSize(), stack.getAmount() * 2));
             item.setItemStack(stack);
-        }
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onAnimalDeath(EntityDeathEvent event) {
-        if (!(event.getEntity() instanceof Animals) || event.getEntity().getKiller() == null) {
-            return;
-        }
-        double chance = luckChance(event.getEntity().getKiller());
-        if (chance <= 0 || random.nextDouble() >= chance) {
-            return;
-        }
-        for (ItemStack drop : event.getDrops()) {
-            drop.setAmount(Math.min(drop.getMaxStackSize(), drop.getAmount() * 2));
         }
     }
 
