@@ -4,35 +4,34 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 
 /**
- * Same shape as MainCore's JobUpgradeHolder (6 rows): row 1 col 5 is the class card, rows 2/4/6
- * each carry one track - its icon in col 1 and MAX_LEVEL wool pips from col 3.
+ * The class screen: the class icon alone on the top row, then the quest board - two quests on
+ * row 2 (cols 4 and 6) and three on row 4 (cols 3, 5 and 7), each with its claim wool directly
+ * underneath. The anvil in the bottom-right corner is 전직.
  */
 public class ClassUpgradeHolder implements InventoryHolder {
 
     public static final int SIZE = 54;
     public static final int SLOT_CLASS = 4;
-    public static final int PIP_START_COL = 2; // 0-based → 3rd column
+    public static final int SLOT_ADVANCE = 53;
+
+    /** Icon slots in board order, matching QuestManager.BOARD. */
+    private static final int[] QUEST_SLOTS = {12, 14, 29, 31, 33};
 
     private Inventory inventory;
 
-    /** Row (0-based) that track `index` occupies: 1, 3, 5. */
-    private static int rowFor(int track) {
-        return 1 + track * 2;
+    public static int questSlot(int index) {
+        return QUEST_SLOTS[index];
     }
 
-    public static int iconSlot(int track) {
-        return rowFor(track) * 9;
+    /** The claim wool sits one row below its quest icon. */
+    public static int woolSlot(int index) {
+        return QUEST_SLOTS[index] + 9;
     }
 
-    public static int pipSlot(int track, int pip) {
-        return rowFor(track) * 9 + PIP_START_COL + pip;
-    }
-
-    /** Track index whose icon sits at `slot`, or -1. */
-    public static int trackForIconSlot(int slot) {
-        for (int t = 0; t < 3; t++) {
-            if (iconSlot(t) == slot) {
-                return t;
+    public static int questForSlot(int slot) {
+        for (int i = 0; i < QUEST_SLOTS.length; i++) {
+            if (QUEST_SLOTS[i] == slot || woolSlot(i) == slot) {
+                return i;
             }
         }
         return -1;

@@ -12,13 +12,20 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class ClassManager {
 
-    private record Pick(MagicClass magicClass, int[] levels) {}
+    private static final class Pick {
+        final MagicClass magicClass;
+        MagicClass.Advancement advancement;
+
+        Pick(MagicClass magicClass) {
+            this.magicClass = magicClass;
+        }
+    }
 
     private final Map<UUID, Pick> picks = new ConcurrentHashMap<>();
 
     public MagicClass classOf(UUID uuid) {
         Pick pick = picks.get(uuid);
-        return pick == null ? null : pick.magicClass();
+        return pick == null ? null : pick.magicClass;
     }
 
     public boolean hasClass(UUID uuid) {
@@ -26,36 +33,32 @@ public class ClassManager {
     }
 
     public void choose(UUID uuid, MagicClass magicClass) {
-        picks.put(uuid, new Pick(magicClass, new int[3]));
+        picks.put(uuid, new Pick(magicClass));
     }
 
-    public int levelOf(UUID uuid, int track) {
+    public MagicClass.Advancement advancementOf(UUID uuid) {
         Pick pick = picks.get(uuid);
-        return pick == null || track < 0 || track > 2 ? 0 : pick.levels()[track];
+        return pick == null ? null : pick.advancement;
     }
 
-    public int totalLevels(UUID uuid) {
+    public boolean hasAdvanced(UUID uuid) {
+        return advancementOf(uuid) != null;
+    }
+
+    public void advance(UUID uuid, MagicClass.Advancement advancement) {
+        Pick pick = picks.get(uuid);
+        if (pick != null) {
+            pick.advancement = advancement;
+        }
+    }
+
+    /** What the player calls themselves now: the tier-2 name once taken, else the base class. */
+    public String displayName(UUID uuid) {
         Pick pick = picks.get(uuid);
         if (pick == null) {
-            return 0;
+            return null;
         }
-        int total = 0;
-        for (int level : pick.levels()) {
-            total += level;
-        }
-        return total;
-    }
-
-    /** @return the new level, or -1 when the track is maxed or not buyable yet. */
-    public int upgrade(UUID uuid, int track) {
-        Pick pick = picks.get(uuid);
-        if (pick == null || track < 0 || track > 2) {
-            return -1;
-        }
-        if (!pick.magicClass().track(track).available() || pick.levels()[track] >= ClassTrack.MAX_LEVEL) {
-            return -1;
-        }
-        return ++pick.levels()[track];
+        return pick.advancement == null ? pick.magicClass.label() : pick.advancement.label();
     }
 
     public void clear() {

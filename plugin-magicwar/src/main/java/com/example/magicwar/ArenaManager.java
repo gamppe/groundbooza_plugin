@@ -16,6 +16,8 @@ import org.bukkit.WorldType;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.MapMeta;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.map.MapView;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
@@ -46,6 +48,7 @@ public class ArenaManager {
     private final MagicWarPlugin plugin;
     private final RoundSettings settings;
     private final ClassManager classes;
+    private final QuestManager quests;
     private final ClassGuideItem guide;
     private ClassController classController;
     private final Random random = new Random();
@@ -62,11 +65,23 @@ public class ArenaManager {
     private double pendingCenterZ;
     private double pendingSize;
 
-    public ArenaManager(MagicWarPlugin plugin, RoundSettings settings, ClassManager classes, ClassGuideItem guide) {
+    public ArenaManager(MagicWarPlugin plugin, RoundSettings settings, ClassManager classes,
+                        QuestManager quests, ClassGuideItem guide) {
         this.plugin = plugin;
         this.settings = settings;
         this.classes = classes;
+        this.quests = quests;
         this.guide = guide;
+    }
+
+    /** Everyone still standing in the arena - what the sidebar counts. */
+    public int alivePlayers() {
+        if (arena == null) {
+            return 0;
+        }
+        return (int) Bukkit.getOnlinePlayers().stream()
+                .filter(p -> p.getWorld().equals(arena) && p.getGameMode() == GameMode.SURVIVAL)
+                .count();
     }
 
     /** Set after construction: the controller needs the manager, and the manager opens the
@@ -199,6 +214,11 @@ public class ArenaManager {
             player.teleport(spawn);
             player.setGameMode(GameMode.SURVIVAL);
             player.setInvulnerable(true);
+            // Speed and Haste for exactly as long as the peace lasts, to spend the prep time
+            // spreading out and gathering rather than walking.
+            int graceTicks = settings.graceSeconds * 20;
+            player.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, graceTicks, 1));
+            player.addPotionEffect(new PotionEffect(PotionEffectType.HASTE, graceTicks, 1));
             giveKit(player);
             player.showTitle(Title.title(
                     Component.text("준비 시간", NamedTextColor.AQUA),
@@ -359,7 +379,7 @@ public class ArenaManager {
         }
         player.getInventory().addItem(new ItemStack(Material.IRON_PICKAXE));
         player.getInventory().addItem(new ItemStack(Material.BREAD, 10));
-        player.getInventory().addItem(guide.create(classes.classOf(player.getUniqueId())));
+        player.getInventory().addItem(guide.create(classes.displayName(player.getUniqueId())));
 
         if (classController != null && !classes.hasClass(player.getUniqueId())) {
             Bukkit.getScheduler().runTask(plugin, () -> {
@@ -403,6 +423,7 @@ public class ArenaManager {
     private void endRound() {
         phase = Phase.IDLE;
         classes.clear(); // a class lasts one match
+        quests.clear();
         for (Player player : Bukkit.getOnlinePlayers()) {
             player.setInvulnerable(false);
             if (!isLobby(player.getWorld())) {

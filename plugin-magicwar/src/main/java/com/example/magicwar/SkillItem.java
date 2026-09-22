@@ -23,14 +23,23 @@ public class SkillItem {
     }
 
     public ItemStack create(MagicClass magicClass, int index) {
-        ClassSkill skill = magicClass.skill(index);
+        return build(magicClass, index, magicClass.skill(index), magicClass.label());
+    }
+
+    /** The tier-2 skill. It keeps the base class's tag so casting resolves the same way, and
+     * takes the next free index after the starting skills. */
+    public ItemStack createAdvanced(MagicClass base, MagicClass.Advancement advancement) {
+        return build(base, base.skills().size(), advancement.skill(), advancement.label());
+    }
+
+    private ItemStack build(MagicClass magicClass, int index, ClassSkill skill, String owner) {
         ItemStack item = new ItemStack(skill.icon());
         ItemMeta meta = item.getItemMeta();
         meta.displayName(Component.text("[" + (index + 1) + "] " + skill.name(), NamedTextColor.AQUA)
                 .decoration(TextDecoration.ITALIC, false));
         meta.setEnchantmentGlintOverride(true);
         meta.lore(List.of(
-                Component.text(magicClass.label() + " 스킬", NamedTextColor.GRAY)
+                Component.text(owner + " 스킬", NamedTextColor.GRAY)
                         .decoration(TextDecoration.ITALIC, false),
                 Component.text("우클릭하여 사용 · 쿨타임 " + skill.cooldownSeconds() + "초", NamedTextColor.DARK_GRAY)
                         .decoration(TextDecoration.ITALIC, false)));

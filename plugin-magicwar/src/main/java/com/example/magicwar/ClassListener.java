@@ -66,7 +66,13 @@ public class ClassListener implements Listener {
      * sweep animation on the hotbar comes for free. */
     private void cast(Player player, ItemStack item, int index) {
         MagicClass magicClass = classes.classOf(player.getUniqueId());
-        if (magicClass == null || index >= magicClass.skills().size()) {
+        if (magicClass == null) {
+            return;
+        }
+        ClassSkill skill = index < magicClass.skills().size()
+                ? magicClass.skill(index)
+                : advancedSkill(player);
+        if (skill == null) {
             return;
         }
         if (!arena.isRunning() || arena.isLobby(player.getWorld())) {
@@ -78,7 +84,6 @@ public class ClassListener implements Listener {
                     NamedTextColor.RED));
             return;
         }
-        ClassSkill skill = magicClass.skill(index);
         player.setCooldown(item, skill.cooldownSeconds() * 20);
 
         Location from = player.getEyeLocation();
@@ -98,9 +103,19 @@ public class ClassListener implements Listener {
                 || event.getClickedInventory() != event.getView().getTopInventory()) {
             return;
         }
-        MagicClass picked = ClassSelectHolder.classForSlot(event.getSlot());
-        if (picked != null) {
-            controller.choose(player, picked);
+        ClassSelectHolder holder = (ClassSelectHolder) event.getView().getTopInventory().getHolder();
+        MagicClass base = classes.classOf(player.getUniqueId());
+        int total = holder.isAdvancing()
+                ? (base == null ? 0 : base.advancements().size())
+                : MagicClass.values().length;
+        int index = ClassSelectHolder.indexForSlot(event.getSlot(), total);
+        if (index < 0) {
+            return;
+        }
+        if (holder.isAdvancing()) {
+            controller.advance(player, index);
+        } else {
+            controller.choose(player, index);
         }
     }
 
@@ -114,10 +129,26 @@ public class ClassListener implements Listener {
                 || event.getClickedInventory() != event.getView().getTopInventory()) {
             return;
         }
-        int track = ClassUpgradeHolder.trackForIconSlot(event.getSlot());
-        if (track >= 0) {
-            controller.upgrade(player, track);
+        if (event.getSlot() == ClassUpgradeHolder.SLOT_ADVANCE) {
+            if (classes.hasAdvanced(player.getUniqueId())) {
+                return;
+            }
+            if (!controller.advancementUnlocked(player.getUniqueId())) {
+                player.sendActionBar(Component.text("전직 퀘스트를 먼저 완료하세요.", NamedTextColor.RED));
+                return;
+            }
+            controller.openAdvance(player);
+            return;
         }
+        int quest = ClassUpgradeHolder.questForSlot(event.getSlot());
+        if (quest >= 0) {
+            controller.claim(player, quest);
+        }
+    }
+
+    private ClassSkill advancedSkill(Player player) {
+        MagicClass.Advancement advancement = classes.advancementOf(player.getUniqueId());
+        return advancement == null ? null : advancement.skill();
     }
 
     /** Closing the picker without choosing puts it straight back up - but only in the arena, so

@@ -12,6 +12,7 @@ public class MagicWarPlugin extends JavaPlugin {
 
     private ArenaManager arenaManager;
     private ClassManager classManager;
+    private QuestManager questManager;
     private ClassGuideItem classGuideItem;
     private SkillItem skillItem;
     private ClassController classController;
@@ -22,10 +23,11 @@ public class MagicWarPlugin extends JavaPlugin {
         FileConfiguration config = getConfig();
 
         this.classManager = new ClassManager();
+        this.questManager = new QuestManager();
         this.classGuideItem = new ClassGuideItem(this);
         this.skillItem = new SkillItem(this);
-        this.arenaManager = new ArenaManager(this, new RoundSettings(config), classManager, classGuideItem);
-        this.classController = new ClassController(this, classManager, classGuideItem, skillItem);
+        this.arenaManager = new ArenaManager(this, new RoundSettings(config), classManager, questManager, classGuideItem);
+        this.classController = new ClassController(this, classManager, questManager, classGuideItem, skillItem);
         arenaManager.setClassController(classController);
 
         // A crash or a /stop mid-round leaves the last arena on disk; nothing holds it open
@@ -39,6 +41,9 @@ public class MagicWarPlugin extends JavaPlugin {
         getCommand("클래스").setExecutor(new ClassCommand(classController));
         getServer().getPluginManager().registerEvents(
                 new ClassListener(this, arenaManager, classManager, classGuideItem, skillItem, classController), this);
+        getServer().getPluginManager().registerEvents(new QuestListener(arenaManager, questManager), this);
+        MagicWarScoreboard scoreboard = new MagicWarScoreboard(arenaManager, classManager, questManager);
+        getServer().getScheduler().runTaskTimer(this, scoreboard::tick, 20L, 20L);
 
         getLogger().info("MagicWar enabled. lobby=" + arenaManager.lobbyWorldName());
     }
