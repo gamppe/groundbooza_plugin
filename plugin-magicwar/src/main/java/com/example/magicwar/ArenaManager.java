@@ -251,9 +251,10 @@ public class ArenaManager {
         }
     }
 
-    /** Announces the next ring and, when the centre moves, picks it now rather than at the
-     * shrink: a warning is only worth giving if it says where to run. The chosen ring is what
-     * the map draws as the pending zone until the wall actually starts moving. */
+    /** One action bar line and a chime, nothing more - the map keeps showing the pending ring
+     * for the rest of the window, so there is no need to keep repeating the text. The centre is
+     * picked here rather than at the shrink: a warning is only worth giving if it says where to
+     * run, and that ring is what the map draws until the wall actually starts moving. */
     private void warnShrink(int number, double from, double to, int warnSeconds) {
         if (arena == null) {
             return;
@@ -270,38 +271,16 @@ public class ArenaManager {
         pendingSize = to;
         pendingZone = true;
 
+        Component line = Component.text("[경고] ", NamedTextColor.RED)
+                .append(Component.text(number + "차 자기장이 " + minutes(warnSeconds) + " 뒤 축소", NamedTextColor.YELLOW))
+                .append(Component.text("  ·  중심 (" + (int) pendingCenterX + ", " + (int) pendingCenterZ
+                        + ")  ·  크기 " + (int) to, NamedTextColor.GRAY));
         for (Player player : Bukkit.getOnlinePlayers()) {
             if (player.getWorld().equals(arena)) {
+                player.sendActionBar(line);
                 player.playSound(player, Sound.BLOCK_NOTE_BLOCK_PLING, 1f, 0.6f);
             }
         }
-        countDownOnActionBar(number, to, warnSeconds);
-    }
-
-    /** The warning lives on the action bar, and an action bar fades after a few seconds - so it
-     * is rewritten every second for the whole escape window, counting down as it goes. */
-    private void countDownOnActionBar(int number, double to, int warnSeconds) {
-        track(new BukkitRunnable() {
-            int left = warnSeconds;
-
-            @Override
-            public void run() {
-                if (arena == null || left <= 0) {
-                    cancel();
-                    return;
-                }
-                Component line = Component.text("[경고] ", NamedTextColor.RED)
-                        .append(Component.text(number + "차 자기장 축소까지 " + minutes(left), NamedTextColor.YELLOW))
-                        .append(Component.text("  ·  중심 (" + (int) pendingCenterX + ", " + (int) pendingCenterZ
-                                + ")  ·  크기 " + (int) to, NamedTextColor.GRAY));
-                for (Player player : Bukkit.getOnlinePlayers()) {
-                    if (player.getWorld().equals(arena)) {
-                        player.sendActionBar(line);
-                    }
-                }
-                left--;
-            }
-        }.runTaskTimer(plugin, 0L, 20L));
     }
 
     private void startShrink(double from, double to, int overSeconds) {
