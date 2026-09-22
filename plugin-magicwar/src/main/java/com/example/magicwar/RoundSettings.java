@@ -22,10 +22,7 @@ public class RoundSettings {
     public final double damagePerBlock;
     public final double damageBuffer;
     public final int warningDistance;
-    public final boolean avoidOcean;
-    public final double maxOceanFraction;
-    public final int samplesPerSide;
-    public final int maxAttempts;
+    public final boolean randomCenter;
     public final List<ShrinkStage> shrinkStages;
 
     public RoundSettings(FileConfiguration config) {
@@ -37,10 +34,7 @@ public class RoundSettings {
         this.damagePerBlock = config.getDouble("border.damage-per-block", 1.0);
         this.damageBuffer = config.getDouble("border.damage-buffer", 1.0);
         this.warningDistance = config.getInt("border.warning-distance", 30);
-        this.avoidOcean = config.getBoolean("terrain.avoid-ocean", true);
-        this.maxOceanFraction = config.getDouble("terrain.max-ocean-percent", 20) / 100.0;
-        this.samplesPerSide = Math.max(2, config.getInt("terrain.samples-per-side", 5));
-        this.maxAttempts = Math.max(1, config.getInt("terrain.max-attempts", 3));
+        this.randomCenter = config.getBoolean("border.random-center", true);
         this.shrinkStages = readStages(config);
     }
 

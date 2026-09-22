@@ -8,9 +8,11 @@ import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.WorldBorder;
 import org.bukkit.WorldCreator;
 import org.bukkit.WorldType;
 import org.bukkit.entity.Player;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.io.File;
@@ -27,9 +29,10 @@ import java.util.Random;
  * Owns the round: countdown, the throwaway arena world, the opening grace period and the
  * battle-royale border.
  *
- * <p>The shrinking ring is plain vanilla: {@code WorldBorder#setSize(size, seconds)} animates
- * the wall inwards on its own and the client draws it, and the server applies the out-of-bounds
- * damage. Nothing here polls player positions.
+ * <p>The shrinking ring is mostly plain vanilla: {@code WorldBorder#setSize(size, seconds)}
+ * animates the wall inwards on its own and the client draws it, and the server applies the
+ * out-of-bounds damage. Nothing here polls player positions. Only the centre needs help -
+ * {@code setCenter} has no duration, so it is walked across the same ticks by hand.
  */
 public class ArenaManager {
 
@@ -112,53 +115,9 @@ public class ArenaManager {
         return null;
     }
 
-    /** Fresh vanilla overworld, random seed, walled in at the configured full size.
-     *
-     * <p>With terrain.avoid-ocean on, a world whose border encloses too much ocean is thrown
-     * away and rolled again. There is no way to ask vanilla for "land only" - terrain shape
-     * comes from the overworld noise, and a custom BiomeProvider would only relabel the water,
-     * not remove it - so rejecting seeds is the honest option. Each attempt generates a whole
-     * world on the main thread, which is why max-attempts is small. */
+    /** Fresh vanilla overworld, random seed, walled in at the configured full size. */
     private void createArena() {
-        World accepted = null;
-        for (int attempt = 1; attempt <= settings.maxAttempts; attempt++) {
-            World candidate = generateWorld();
-            if (candidate == null) {
-                continue;
-            }
-            if (!settings.avoidOcean) {
-                accepted = candidate;
-                break;
-            }
-            double ocean = oceanFraction(candidate);
-            if (ocean <= settings.maxOceanFraction || attempt == settings.maxAttempts) {
-                if (ocean > settings.maxOceanFraction) {
-                    plugin.getLogger().info(String.format(
-                            "Arena still %.0f%% ocean after %d attempts - going with it.", ocean * 100, attempt));
-                }
-                accepted = candidate;
-                break;
-            }
-            plugin.getLogger().info(String.format(
-                    "Arena attempt %d was %.0f%% ocean - rerolling.", attempt, ocean * 100));
-            discard(candidate);
-        }
-        if (accepted == null) {
-            plugin.getLogger().warning("Could not generate an arena world.");
-            return;
-        }
-        var border = accepted.getWorldBorder();
-        border.setCenter(0.5, 0.5);
-        border.setSize(settings.fullSize());
-        border.setDamageAmount(settings.damagePerBlock);
-        border.setDamageBuffer(settings.damageBuffer);
-        border.setWarningDistance(settings.warningDistance);
-        accepted.setKeepSpawnInMemory(false);
-        arena = accepted;
-    }
-
-    private World generateWorld() {
-        String name = settings.arenaPrefix + System.currentTimeMillis() / 1000 + "_" + random.nextInt(1000);
+        String name = settings.arenaPrefix + System.currentTimeMillis() / 1000;
         World world = new WorldCreator(name)
                 .environment(World.Environment.NORMAL)
                 .type(WorldType.NORMAL)
@@ -166,34 +125,16 @@ public class ArenaManager {
                 .createWorld();
         if (world == null) {
             plugin.getLogger().warning("Arena world creation returned null: " + name);
+            return;
         }
-        return world;
-    }
-
-    /** Share of sampled points inside the border that sit in an ocean biome. Every sample pulls
-     * in a chunk, so the grid is deliberately coarse. */
-    private double oceanFraction(World world) {
-        int n = settings.samplesPerSide;
-        int half = settings.borderHalfWidth;
-        int step = (half * 2) / (n - 1);
-        int ocean = 0;
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                int x = -half + i * step;
-                int z = -half + j * step;
-                if (world.getBiome(x, world.getSeaLevel(), z).getKey().getKey().contains("ocean")) {
-                    ocean++;
-                }
-            }
-        }
-        return (double) ocean / (n * n);
-    }
-
-    private void discard(World world) {
-        File folder = world.getWorldFolder();
-        if (Bukkit.unloadWorld(world, false)) {
-            deleteRecursively(folder.toPath());
-        }
+        var border = world.getWorldBorder();
+        border.setCenter(0.5, 0.5);
+        border.setSize(settings.fullSize());
+        border.setDamageAmount(settings.damagePerBlock);
+        border.setDamageBuffer(settings.damageBuffer);
+        border.setWarningDistance(settings.warningDistance);
+        world.setKeepSpawnInMemory(false);
+        arena = world;
     }
 
     // ---------- grace period ----------
@@ -266,14 +207,58 @@ public class ArenaManager {
         if (arena == null) {
             return;
         }
-        arena.getWorldBorder().setSize(to, overSeconds);
+        WorldBorder border = arena.getWorldBorder();
+        border.setSize(to, overSeconds);
+
+        Component where = Component.empty();
+        if (settings.randomCenter) {
+            Location current = border.getCenter();
+            double[] target = pickCenter(current.getX(), current.getZ(), from / 2, to / 2);
+            slideCenter(border, current.getX(), current.getZ(), target[0], target[1], overSeconds);
+            where = Component.text(" · 중심 (" + (int) target[0] + ", " + (int) target[1] + ")", NamedTextColor.YELLOW);
+        }
         announce(Component.text("경계가 좁혀집니다: " + (int) from + " → " + (int) to
-                + " (" + overSeconds + "초)", NamedTextColor.GOLD));
+                + " (" + overSeconds + "초)", NamedTextColor.GOLD).append(where));
         for (Player player : Bukkit.getOnlinePlayers()) {
             if (player.getWorld().equals(arena)) {
                 player.playSound(player, Sound.BLOCK_BEACON_DEACTIVATE, 1f, 0.8f);
             }
         }
+    }
+
+    /** A new centre somewhere inside the current ring, close enough in that the smaller circle
+     * still fits entirely within the old one: offset at most (oldRadius - newRadius). Without
+     * that cap someone standing safely inside could end up outside without moving. The distance
+     * is sqrt-weighted so the point is spread evenly over the disc instead of bunching up in
+     * the middle. */
+    private double[] pickCenter(double x, double z, double fromRadius, double toRadius) {
+        double maxOffset = Math.max(0, fromRadius - toRadius);
+        double angle = random.nextDouble() * Math.PI * 2;
+        double distance = maxOffset * Math.sqrt(random.nextDouble());
+        return new double[]{x + Math.cos(angle) * distance, z + Math.sin(angle) * distance};
+    }
+
+    /** setSize animates itself, but setCenter teleports the wall, so the centre is walked over
+     * the same number of ticks by hand. */
+    private void slideCenter(WorldBorder border, double fromX, double fromZ, double toX, double toZ, int overSeconds) {
+        if (overSeconds <= 0) {
+            border.setCenter(toX, toZ);
+            return;
+        }
+        int totalTicks = overSeconds * 20;
+        track(new BukkitRunnable() {
+            int elapsed = 0;
+
+            @Override
+            public void run() {
+                elapsed++;
+                double t = Math.min(1.0, (double) elapsed / totalTicks);
+                border.setCenter(fromX + (toX - fromX) * t, fromZ + (toZ - fromZ) * t);
+                if (t >= 1.0) {
+                    cancel();
+                }
+            }
+        }.runTaskTimer(plugin, 1L, 1L));
     }
 
     /** The generated spawn can be underwater or in a tree; this drops everyone on the surface
