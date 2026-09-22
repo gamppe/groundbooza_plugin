@@ -1,8 +1,7 @@
-package com.example.maincore;
+package com.example.serverbridge;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Particle;
@@ -43,7 +42,8 @@ import java.util.function.Consumer;
  * otherwise sink or drop it out of sight) and a custom wait-then-reward flow takes over. The
  * reward tables here ignore 낚시능력증가's fish/junk/treasure split entirely, and some outcomes
  * aren't items: a mob gets reeled in, the player catches fire, or gets yanked somewhere.
- * 낚시꾼의 행운 (FisherAbilities) cuts the 5~15 s wait down to 1~2 s. */
+ * 낚시꾼의 행운 (FisherAbilities) cuts the 5~15 s wait down to 1~2 s.
+ * Farm-server copy of MainCore's listener - farm-server has its own Nether and End. */
 public class LavaVoidFishingListener implements Listener {
 
     private enum Loot { LAVA, VOID }
@@ -86,16 +86,20 @@ public class LavaVoidFishingListener implements Listener {
     private static final long MAX_WAIT_MILLIS = 15_000;
     private static final int TELEPORT_RADIUS = 24;
 
-    private final MainCorePlugin plugin;
+    private final ServerBridgePlugin plugin;
+    private final JobCache jobs;
+    private final FisherAbilities fisherAbilities;
     private final Map<UUID, Tracked> tracked = new HashMap<>();
     private final List<Flying> flying = new ArrayList<>();
     private final Random random = new Random();
     private final WeightedTable<Consumer<Tracked>> lavaLoot;
     private final WeightedTable<Consumer<Tracked>> voidLoot;
 
-    public LavaVoidFishingListener(MainCorePlugin plugin) {
+    public LavaVoidFishingListener(ServerBridgePlugin plugin, JobCache jobs, FisherAbilities fisherAbilities) {
         this.plugin = plugin;
-        FishItems fish = plugin.getFishItems();
+        this.jobs = jobs;
+        this.fisherAbilities = fisherAbilities;
+        FishItems fish = new FishItems();
 
         lavaLoot = new WeightedTable<Consumer<Tracked>>()
                 .add(9, odd(t -> reelMob(t, Strider.class, "스트라이더")))
@@ -113,7 +117,7 @@ public class LavaVoidFishingListener implements Listener {
                 .add(4, give(Material.FIRE_CHARGE))
                 .add(3, give(Material.NETHER_BRICK))
                 .add(0.2, give(Material.NETHERITE_SCRAP))
-                .add(0.01, give(plugin.getWildDeedItem().create()))
+                .add(0.01, give(WildDeedItem.create()))
                 .add(2.5, give(Material.TWISTING_VINES))
                 .add(2.5, give(Material.WEEPING_VINES))
                 .add(1, odd(t -> {
@@ -133,7 +137,7 @@ public class LavaVoidFishingListener implements Listener {
                 .add(0.05, odd(t -> reelMob(t, Dolphin.class, "돌고래")))
                 .add(0.2, give(Material.ENCHANTED_GOLDEN_APPLE))
                 .add(0.2, give(Material.OMINOUS_TRIAL_KEY))
-                .add(0.01, give(plugin.getWildDeedItem().create()))
+                .add(0.01, give(WildDeedItem.create()))
                 .add(1, odd(effect(PotionEffectType.LEVITATION, 10 * 20, "몸이 떠오릅니다!")))
                 .add(0.3, odd(effect(PotionEffectType.DARKNESS, 5 * 20, "눈앞이 어두워집니다...")))
                 .add(10, give(Material.ENDER_PEARL))
@@ -158,11 +162,10 @@ public class LavaVoidFishingListener implements Listener {
             return;
         }
         ItemStack rod = FishingLoot.rodInHand(player);
-        if (!plugin.getBaitRodItem().isSpecialRod(rod) || !plugin.getJobManager().canUse(player, rod)) {
+        if (!JobCache.FISHER.equals(JobCache.toolJob(rod)) || !jobs.canUse(player, rod)) {
             return; // 어부 only - a leftover rod from a previous job fishes like a plain one
         }
-        MainDatabase.JobProfile profile = plugin.getJobManager().getProfile(player.getUniqueId());
-        int baitLevel = profile == null ? 0 : profile.level(1);
+        int baitLevel = jobs.level(player.getUniqueId(), JobCache.FISHER, 1);
         if (!canFishHere(baitLevel, player.getWorld().getEnvironment())) {
             return;
         }
@@ -174,7 +177,7 @@ public class LavaVoidFishingListener implements Listener {
         tracked.remove(event.getPlayer().getUniqueId());
     }
 
-    /** Called every tick from MainCorePlugin. */
+    /** Called every tick from ServerBridgePlugin. */
     public void tick() {
         tickFlying();
         Iterator<Tracked> it = tracked.values().iterator();
@@ -214,7 +217,7 @@ public class LavaVoidFishingListener implements Listener {
         t.anchored = true;
         t.loot = inLava ? Loot.LAVA : Loot.VOID;
         t.anchorLoc = loc.clone();
-        boolean lucky = plugin.getFisherAbilities().isActive(t.player.getUniqueId());
+        boolean lucky = fisherAbilities.isActive(t.player.getUniqueId());
         long min = lucky ? FisherAbilities.BUFFED_LAVA_MIN_WAIT_MILLIS : MIN_WAIT_MILLIS;
         long max = lucky ? FisherAbilities.BUFFED_LAVA_MAX_WAIT_MILLIS : MAX_WAIT_MILLIS;
         t.biteAtMillis = System.currentTimeMillis() + min + random.nextInt((int) (max - min));
@@ -304,7 +307,7 @@ public class LavaVoidFishingListener implements Listener {
         if (f.entity instanceof Item item) {
             // Stays fire-proof a moment longer, so landing beside the lava it came out of
             // cannot undo the catch; after that it burns like any other dropped item.
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
                 if (item.isValid()) {
                     item.setInvulnerable(false);
                 }

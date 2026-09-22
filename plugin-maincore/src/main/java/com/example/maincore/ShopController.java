@@ -126,7 +126,7 @@ public class ShopController {
         SpecialHoeItem hoe = plugin.getSpecialHoeItem();
         SpecialPickaxeItem pickaxe = plugin.getSpecialPickaxeItem();
         SpecialAxeItem axe = plugin.getSpecialAxeItem();
-        FishingRodTierItem rod = plugin.getFishingRodTierItem();
+        BaitRodItem rod = plugin.getBaitRodItem();
         CompassBiomeFinderItem compass = plugin.getCompassBiomeFinderItem();
         SpeedBootsItem boots = plugin.getSpeedBootsItem();
 
@@ -155,10 +155,7 @@ public class ShopController {
         }
 
         List<ShopItem> fisher = specialCatalogs.get(Job.FISHER);
-        addPlain(fisher, Material.FISHING_ROD, "낚시대", FREE_PRICE);
-        for (FishingRodTierItem.Tier tier : FishingRodTierItem.Tier.values()) {
-            fisher.add(new ShopItem(tier.label, rod.create(tier), SPECIAL_PRICE, () -> rod.create(tier)));
-        }
+        fisher.add(new ShopItem(BaitRodItem.LABEL, rod.create(), SPECIAL_PRICE, rod::create));
 
         List<ShopItem> miner = specialCatalogs.get(Job.MINER);
         miner.add(new ShopItem("자석 곡괭이", pickaxe.create(), SPECIAL_PRICE, pickaxe::create));

@@ -6,6 +6,7 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
@@ -258,6 +259,13 @@ public class JobController {
             UpgradeTrack definition = profile.job().track(track);
             player.sendMessage(Component.text(
                     definition.label() + " " + level + "단계 완료! (" + definition.effectAt(level) + ")", NamedTextColor.GREEN));
+            if (level >= UpgradeTrack.MAX_LEVEL) {
+                // Maxing a track is rare enough to deserve the advancement fanfare.
+                player.playSound(player, Sound.UI_TOAST_CHALLENGE_COMPLETE, 1f, 1f);
+                player.playSound(player, Sound.ENTITY_PLAYER_LEVELUP, 0.7f, 1.2f);
+            } else {
+                player.playSound(player, Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1f, 1f);
+            }
             if (player.getOpenInventory().getTopInventory().getHolder() instanceof JobUpgradeHolder) {
                 openUpgrades(player); // refresh pips + numbers
             }

@@ -1,28 +1,16 @@
 package com.example.maincore;
 
-import org.bukkit.Material;
-import org.bukkit.block.Biome;
-import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.player.PlayerFishEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.inventory.ItemStack;
 
-import java.util.Random;
-import java.util.Set;
-
-/** /직업 menu clicks, the job cache's join/quit lifecycle, and 어부's biome-dependent catches. */
+/** /직업 menu clicks and the job cache's join/quit lifecycle. */
 public class JobListener implements Listener {
 
-    private static final Set<Material> VANILLA_FISH = Set.of(
-            Material.COD, Material.SALMON, Material.TROPICAL_FISH, Material.PUFFERFISH);
-
     private final MainCorePlugin plugin;
-    private final Random random = new Random();
 
     public JobListener(MainCorePlugin plugin) {
         this.plugin = plugin;
@@ -96,48 +84,5 @@ public class JobListener implements Listener {
         if (track >= 0) {
             plugin.getJobController().upgrade(player, track);
         }
-    }
-
-    // ---------- 어부: what you catch depends on where the hook landed ----------
-
-    @EventHandler(ignoreCancelled = true)
-    public void onFish(PlayerFishEvent event) {
-        if (event.getState() != PlayerFishEvent.State.CAUGHT_FISH) {
-            return;
-        }
-        Player player = event.getPlayer();
-        if (!plugin.getJobManager().hasJob(player.getUniqueId(), Job.FISHER)) {
-            return;
-        }
-        if (!(event.getCaught() instanceof Item caughtItem)) {
-            return;
-        }
-        ItemStack stack = caughtItem.getItemStack();
-        if (!VANILLA_FISH.contains(stack.getType())) {
-            return; // treasure / junk rolls are left alone
-        }
-        Biome biome = event.getHook().getLocation().getBlock().getBiome();
-        Material replacement = fishFor(biome);
-        if (replacement != stack.getType()) {
-            caughtItem.setItemStack(new ItemStack(replacement, stack.getAmount()));
-        }
-    }
-
-    /** Cold water → salmon, warm/tropical water → tropical fish (with some pufferfish), open
-     * ocean → cod, and everything inland is a cod/salmon coin flip. Matched on the biome key
-     * so new biome variants slot in without upkeep. */
-    private Material fishFor(Biome biome) {
-        String key = biome.getKey().getKey();
-        if (key.contains("frozen") || key.contains("cold") || key.contains("snowy")
-                || key.contains("ice") || key.contains("taiga") || key.contains("grove")) {
-            return Material.SALMON;
-        }
-        if (key.contains("warm") || key.contains("jungle") || key.contains("mangrove") || key.contains("lush")) {
-            return random.nextDouble() < 0.2 ? Material.PUFFERFISH : Material.TROPICAL_FISH;
-        }
-        if (key.contains("ocean") || key.contains("beach")) {
-            return Material.COD;
-        }
-        return random.nextBoolean() ? Material.COD : Material.SALMON;
     }
 }

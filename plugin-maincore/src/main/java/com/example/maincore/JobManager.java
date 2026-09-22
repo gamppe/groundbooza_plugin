@@ -259,7 +259,7 @@ public class JobManager {
     /** Which job a special tool belongs to, or null for anything that isn't one. */
     public Job toolJob(ItemStack item) {
         if (plugin.getSpecialHoeItem().isSpecialHoe(item)) return Job.FARMER;
-        if (plugin.getFishingRodTierItem().isSpecialRod(item)) return Job.FISHER;
+        if (plugin.getBaitRodItem().isSpecialRod(item)) return Job.FISHER;
         if (plugin.getSpecialPickaxeItem().isSpecialPickaxe(item)) return Job.MINER;
         if (plugin.getSpecialAxeItem().isSpecialAxe(item)) return Job.BUILDER;
         if (plugin.getCompassBiomeFinderItem().isSpecialCompass(item)) return Job.ADVENTURER;
@@ -271,8 +271,8 @@ public class JobManager {
     public void applyLevel(ItemStack item, int level) {
         if (plugin.getSpecialHoeItem().isSpecialHoe(item)) {
             plugin.getSpecialHoeItem().setLevel(item, level);
-        } else if (plugin.getFishingRodTierItem().isSpecialRod(item)) {
-            plugin.getFishingRodTierItem().setLevel(item, level);
+        } else if (plugin.getBaitRodItem().isSpecialRod(item)) {
+            plugin.getBaitRodItem().setLevel(item, level);
         } else if (plugin.getSpecialPickaxeItem().isSpecialPickaxe(item)) {
             plugin.getSpecialPickaxeItem().setLevel(item, level);
         } else if (plugin.getSpecialAxeItem().isSpecialAxe(item)) {

@@ -30,19 +30,23 @@ public enum Job {
                                     : "쿨타임 " + FarmerAbilities.rainCooldownMinutes(level) + "분")),
             1),
     FISHER("어부", Material.FISHING_ROD, List.of(
-            "바이옴에 따라 잡히는 물고기가 달라짐",
-            "일반 낚시대 무료, 특수 낚시대 3종 구매",
-            "대단한 낚시대로 용암/허공 낚시 (업글: 미끼 인챈트)"),
+            "수제미끼낚시대 구매",
+            "낚시능력증가: 물고기/쓰레기/보물 비율이 좋아짐",
+            "섬세한 미끼제작: 지역별 희귀 물고기, 용암/허공 낚시",
+            "낚시꾼의 행운: 웅크리고 우클릭 → 즉시 입질 버프"),
             List.of(
-                    UpgradeTrack.of("미끼 인챈트", Material.FISHING_ROD,
-                            List.of("특수 낚시대 3종에 미끼 인챈트가 붙습니다"),
-                            level -> {
-                                int lure = FishingRodTierItem.lureLevel(level);
-                                return lure == 0 ? "미끼 없음" : "미끼 " + lure + "레벨";
-                            }),
-                    UpgradeTrack.unavailable(),
-                    UpgradeTrack.unavailable()),
-            0),
+                    UpgradeTrack.of("낚시능력증가", Material.COD,
+                            List.of("좋은 물고기가 잡힐 확률이 올라갑니다.", "보물이 낚일 수도 있습니다.", "(플레이어에게 붙는 효과)"),
+                            FishingLoot::abilityEffect),
+                    UpgradeTrack.of("섬세한 미끼제작", Material.STRING,
+                            List.of("미끼를 제작하는 노하우를 얻어 색다른 물고기를 얻을 수 있을 것 같습니다.", "(수제미끼낚시대에만 적용)"),
+                            FishingLoot::baitEffect),
+                    UpgradeTrack.of("낚시꾼의 행운", Material.HEART_OF_THE_SEA,
+                            List.of("웅크린 채 낚시대를 우클릭하면 잠시 동안 찌가 물에 닿자마자 입질이 옵니다",
+                                    "네더/허공 낚시의 대기시간도 대폭 줄어듭니다",
+                                    "1단계에서 해금 (지속 5초, 쿨타임 30분), 이후 단계마다 쿨타임 5분 단축·지속 1.5초 증가"),
+                            FisherAbilities::effect)),
+            1),
     MINER("광부", Material.NETHERITE_PICKAXE, List.of(
             "횃불 무료",
             "원광을 주괴로 즉시 전환",

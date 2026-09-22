@@ -1,4 +1,4 @@
-package com.example.serverbridge;
+package com.example.maincore;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -29,8 +29,7 @@ import java.util.UUID;
  * a tick), and lava/void fishing waits only a second or two instead of 5~15 s. Unlocked at
  * level 1 (5 s / 30 min); each level after takes 5 min off the cooldown and adds 1.5 s. Cooldown lives
  * in the player's PDC like the miner teleport; the buff itself is in-memory (a relog ends it).
- * Farm-server copy of MainCore's FisherAbilities (same PDC key, so the cooldown is per server
- * only because the PDC is - a known compromise shared with the other job cooldowns).
+ * ServerBridge carries a copy for farm-server.
  */
 public class FisherAbilities implements Listener {
 
@@ -42,14 +41,13 @@ public class FisherAbilities implements Listener {
     public static final long BUFFED_LAVA_MIN_WAIT_MILLIS = 1_000;
     public static final long BUFFED_LAVA_MAX_WAIT_MILLIS = 2_000;
 
-    private final ServerBridgePlugin plugin;
-    private final JobCache jobs;
-    private final NamespacedKey cooldownKey = new NamespacedKey("maincore", "fisher_luck_ready_at");
+    private final MainCorePlugin plugin;
+    private final NamespacedKey cooldownKey;
     private final Map<UUID, Long> activeUntil = new HashMap<>();
 
-    public FisherAbilities(ServerBridgePlugin plugin, JobCache jobs) {
+    public FisherAbilities(MainCorePlugin plugin) {
         this.plugin = plugin;
-        this.jobs = jobs;
+        this.cooldownKey = new NamespacedKey(plugin, "fisher_luck_ready_at");
     }
 
     public static int cooldownMinutes(int level) {
@@ -58,6 +56,14 @@ public class FisherAbilities implements Listener {
 
     public static double buffSeconds(int level) {
         return BASE_BUFF_SECONDS + BUFF_STEP_SECONDS * (level - 1);
+    }
+
+    public static String effect(int level) {
+        if (level <= 0) {
+            return "잠김";
+        }
+        String seconds = buffSeconds(level) % 1 == 0 ? String.valueOf((int) buffSeconds(level)) : String.valueOf(buffSeconds(level));
+        return "지속 " + seconds + "초 / 쿨타임 " + cooldownMinutes(level) + "분";
     }
 
     public boolean isActive(UUID uuid) {
@@ -92,7 +98,11 @@ public class FisherAbilities implements Listener {
 
     /** Level in the 낚시꾼의 행운 track, or 0 for anyone who can't use it. */
     private int trackLevel(UUID uuid) {
-        return jobs.level(uuid, JobCache.FISHER, 2);
+        MainDatabase.JobProfile profile = plugin.getJobManager().getProfile(uuid);
+        if (profile == null || profile.job() != Job.FISHER) {
+            return 0;
+        }
+        return profile.level(2);
     }
 
     /** Starts the buff if it's unlocked, not already running and off cooldown. Silent when the
@@ -162,7 +172,7 @@ public class FisherAbilities implements Listener {
         }
     }
 
-    /** Called every 5 ticks from ServerBridgePlugin: announces expiry. */
+    /** Called every 5 ticks from MainCorePlugin: announces expiry. */
     public void tick() {
         long now = System.currentTimeMillis();
         Iterator<Map.Entry<UUID, Long>> it = activeUntil.entrySet().iterator();

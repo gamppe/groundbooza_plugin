@@ -56,7 +56,15 @@ public class ServerBridgePlugin extends JavaPlugin {
             getServer().getPluginManager().registerEvents(new AnimalFeeding(farmerAbilities), this);
             getServer().getPluginManager().registerEvents(minerAbilities, this);
             getServer().getPluginManager().registerEvents(farmerAbilities, this);
-            getServer().getPluginManager().registerEvents(new FisherAbilities(jobs), this);
+            getServer().getPluginManager().registerEvents(new FishItems(), this);
+            getServer().getPluginManager().registerEvents(new FishingLoot(jobs), this);
+            getServer().getPluginManager().registerEvents(new WildDeedItem(), this);
+            FisherAbilities fisherAbilities = new FisherAbilities(this, jobs);
+            getServer().getPluginManager().registerEvents(fisherAbilities, this);
+            getServer().getScheduler().runTaskTimer(this, fisherAbilities::tick, 1L, 5L);
+            LavaVoidFishingListener lavaVoidFishingListener = new LavaVoidFishingListener(this, jobs, fisherAbilities);
+            getServer().getPluginManager().registerEvents(lavaVoidFishingListener, this);
+            getServer().getScheduler().runTaskTimer(this, lavaVoidFishingListener::tick, 1L, 1L);
             getServer().getPluginManager().registerEvents(new NoEnchantListener(item -> JobCache.toolJob(item) != null), this);
             DyeRecipes dyeRecipes = new DyeRecipes(this);
             getServer().getPluginManager().registerEvents(dyeRecipes, this);

@@ -34,7 +34,9 @@ public class MainCorePlugin extends JavaPlugin {
     private SpecialHoeItem specialHoeItem;
     private SpecialPickaxeItem specialPickaxeItem;
     private SpecialAxeItem specialAxeItem;
-    private FishingRodTierItem fishingRodTierItem;
+    private BaitRodItem baitRodItem;
+    private FishItems fishItems;
+    private WildDeedItem wildDeedItem;
     private CompassBiomeFinderItem compassBiomeFinderItem;
     private SpecialToolListener specialToolListener;
     private ReservationDeedItem reservationDeedItem;
@@ -42,6 +44,7 @@ public class MainCorePlugin extends JavaPlugin {
     private JobManager jobManager;
     private JobController jobController;
     private MinerAbilities minerAbilities;
+    private FisherAbilities fisherAbilities;
     private TerraformController terraformController;
     private AnimalEggItem animalEggItem;
     private CropRules cropRules;
@@ -81,13 +84,16 @@ public class MainCorePlugin extends JavaPlugin {
         this.specialHoeItem = new SpecialHoeItem(this);
         this.specialPickaxeItem = new SpecialPickaxeItem(this);
         this.specialAxeItem = new SpecialAxeItem(this);
-        this.fishingRodTierItem = new FishingRodTierItem(this);
+        this.baitRodItem = new BaitRodItem(this);
+        this.fishItems = new FishItems(this);
+        this.wildDeedItem = new WildDeedItem(this);
         this.compassBiomeFinderItem = new CompassBiomeFinderItem(this);
         this.reservationDeedItem = new ReservationDeedItem(this);
         this.speedBootsItem = new SpeedBootsItem(this);
         this.jobManager = new JobManager(this);
         this.jobController = new JobController(this);
         this.minerAbilities = new MinerAbilities(this);
+        this.fisherAbilities = new FisherAbilities(this);
         this.terraformController = new TerraformController(this);
         this.animalEggItem = new AnimalEggItem(this);
         this.cropRules = new CropRules(this);
@@ -177,6 +183,11 @@ public class MainCorePlugin extends JavaPlugin {
         Bukkit.getScheduler().runTaskTimer(this, specialToolListener::tickWorldEditAxe, 1L, 1L);
         Bukkit.getScheduler().runTaskTimer(this, specialToolListener::tickMagnetPickaxe, 1L, 2L);
 
+        getServer().getPluginManager().registerEvents(fishItems, this);
+        getServer().getPluginManager().registerEvents(new FishingLoot(this), this);
+        getServer().getPluginManager().registerEvents(new WildDeedListener(this), this);
+        getServer().getPluginManager().registerEvents(fisherAbilities, this);
+        Bukkit.getScheduler().runTaskTimer(this, fisherAbilities::tick, 1L, 5L);
         LavaVoidFishingListener lavaVoidFishingListener = new LavaVoidFishingListener(this);
         getServer().getPluginManager().registerEvents(lavaVoidFishingListener, this);
         Bukkit.getScheduler().runTaskTimer(this, lavaVoidFishingListener::tick, 1L, 1L);
@@ -302,8 +313,16 @@ public class MainCorePlugin extends JavaPlugin {
         return specialAxeItem;
     }
 
-    public FishingRodTierItem getFishingRodTierItem() {
-        return fishingRodTierItem;
+    public BaitRodItem getBaitRodItem() {
+        return baitRodItem;
+    }
+
+    public FishItems getFishItems() {
+        return fishItems;
+    }
+
+    public WildDeedItem getWildDeedItem() {
+        return wildDeedItem;
     }
 
     public CompassBiomeFinderItem getCompassBiomeFinderItem() {
@@ -332,6 +351,10 @@ public class MainCorePlugin extends JavaPlugin {
 
     public MinerAbilities getMinerAbilities() {
         return minerAbilities;
+    }
+
+    public FisherAbilities getFisherAbilities() {
+        return fisherAbilities;
     }
 
     public TerraformController getTerraformController() {
@@ -365,7 +388,7 @@ public class MainCorePlugin extends JavaPlugin {
         return specialHoeItem.isSpecialHoe(item)
                 || specialPickaxeItem.isSpecialPickaxe(item)
                 || specialAxeItem.isSpecialAxe(item)
-                || fishingRodTierItem.isSpecialRod(item)
+                || baitRodItem.isSpecialRod(item)
                 || compassBiomeFinderItem.isSpecialCompass(item)
                 || speedBootsItem.isSpecialBoots(item)
                 || terraformController.isBrush(item)
@@ -379,7 +402,7 @@ public class MainCorePlugin extends JavaPlugin {
         return specialHoeItem.isSpecialHoe(item)
                 || specialPickaxeItem.isSpecialPickaxe(item)
                 || specialAxeItem.isSpecialAxe(item)
-                || fishingRodTierItem.isSpecialRod(item)
+                || baitRodItem.isSpecialRod(item)
                 || compassBiomeFinderItem.isSpecialCompass(item)
                 || speedBootsItem.isSpecialBoots(item);
     }
