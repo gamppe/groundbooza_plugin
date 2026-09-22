@@ -3,8 +3,6 @@ package com.example.magicwar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -26,15 +24,18 @@ public class ClassListener implements Listener {
     private final ClassGuideItem guide;
     private final SkillItem skillItems;
     private final ClassController controller;
+    private final SkillEffects effects;
 
     public ClassListener(MagicWarPlugin plugin, ArenaManager arena, ClassManager classes,
-                         ClassGuideItem guide, SkillItem skillItems, ClassController controller) {
+                         ClassGuideItem guide, SkillItem skillItems, ClassController controller,
+                         SkillEffects effects) {
         this.plugin = plugin;
         this.arena = arena;
         this.classes = classes;
         this.guide = guide;
         this.skillItems = skillItems;
         this.controller = controller;
+        this.effects = effects;
     }
 
     /** Deliberately NOT ignoreCancelled: a right-click on thin air can reach listeners already
@@ -61,9 +62,9 @@ public class ClassListener implements Listener {
         }
     }
 
-    /** Placeholder cast: the cooldown, the feedback and the gating are real, what the skill
-     * actually does is not decided yet. The cooldown uses the vanilla item cooldown, so the
-     * sweep animation on the hotbar comes for free. */
+    /** Resolves which skill the item casts, gates it, then hands the effect to SkillEffects.
+     * The cooldown uses the vanilla item cooldown, so the sweep animation comes for free, and
+     * it is only started once the cast actually went through. */
     private void cast(Player player, ItemStack item, int index) {
         MagicClass magicClass = classes.classOf(player.getUniqueId());
         if (magicClass == null) {
@@ -84,66 +85,10 @@ public class ClassListener implements Listener {
                     NamedTextColor.RED));
             return;
         }
+        if (!effects.cast(player, skill)) {
+            return;
+        }
         player.setCooldown(item, skill.cooldownSeconds() * 20);
-
-        Location from = player.getEyeLocation();
-        player.getWorld().spawnParticle(Particle.ENCHANT, from.clone().add(from.getDirection().multiply(1.5)),
-                40, 0.4, 0.4, 0.4, 0.5);
-        player.getWorld().playSound(from, Sound.ENTITY_ILLUSIONER_CAST_SPELL, 1f, 1.2f);
-        player.sendActionBar(Component.text(skill.name() + " 사용!", NamedTextColor.AQUA));
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onSelectClick(InventoryClickEvent event) {
-        if (!(event.getView().getTopInventory().getHolder() instanceof ClassSelectHolder)) {
-            return;
-        }
-        event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player)
-                || event.getClickedInventory() != event.getView().getTopInventory()) {
-            return;
-        }
-        ClassSelectHolder holder = (ClassSelectHolder) event.getView().getTopInventory().getHolder();
-        MagicClass base = classes.classOf(player.getUniqueId());
-        int total = holder.isAdvancing()
-                ? (base == null ? 0 : base.advancements().size())
-                : MagicClass.values().length;
-        int index = ClassSelectHolder.indexForSlot(event.getSlot(), total);
-        if (index < 0) {
-            return;
-        }
-        if (holder.isAdvancing()) {
-            controller.advance(player, index);
-        } else {
-            controller.choose(player, index);
-        }
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onUpgradeClick(InventoryClickEvent event) {
-        if (!(event.getView().getTopInventory().getHolder() instanceof ClassUpgradeHolder)) {
-            return;
-        }
-        event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player)
-                || event.getClickedInventory() != event.getView().getTopInventory()) {
-            return;
-        }
-        if (event.getSlot() == ClassUpgradeHolder.SLOT_ADVANCE) {
-            if (classes.hasAdvanced(player.getUniqueId())) {
-                return;
-            }
-            if (!controller.advancementUnlocked(player.getUniqueId())) {
-                player.sendActionBar(Component.text("전직 퀘스트를 먼저 완료하세요.", NamedTextColor.RED));
-                return;
-            }
-            controller.openAdvance(player);
-            return;
-        }
-        int quest = ClassUpgradeHolder.questForSlot(event.getSlot());
-        if (quest >= 0) {
-            controller.claim(player, quest);
-        }
     }
 
     private ClassSkill advancedSkill(Player player) {
