@@ -445,6 +445,7 @@ public class ArenaManager {
         phase = Phase.IDLE;
         classes.clear(); // a class lasts one match
         quests.clear();
+        plugin.getSkillCooldowns().clear();
         for (Player player : Bukkit.getOnlinePlayers()) {
             player.setInvulnerable(false);
             if (!isLobby(player.getWorld())) {

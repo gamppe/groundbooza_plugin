@@ -32,7 +32,7 @@ public enum MagicClass {
                                     EntityType.SPIDER)))),
 
     SORCERER("소서러", Material.FIRE_CHARGE, "원거리 주문으로 싸우는 마법사",
-            List.of(new ClassSkill("sorcerer_1", "첫번째 스킬", Material.FLOW_BANNER_PATTERN, 10)),
+            List.of(new ClassSkill("bolt", "볼트마법", Material.FLOW_BANNER_PATTERN, 6, 3)),
             List.of(
                     new Advancement("엘리멘탈리스트", Material.BLAZE_POWDER, NamedTextColor.AQUA,
                             new ClassSkill("elementalist_2", "두번째 스킬", Material.GLOBE_BANNER_PATTERN, 20),
@@ -46,7 +46,7 @@ public enum MagicClass {
                                     EntityType.SKELETON)))),
 
     SUMMONER("서머너", Material.PIG_SPAWN_EGG, "소환수를 부려 싸우는 술사",
-            List.of(new ClassSkill("summoner_1", "첫번째 스킬", Material.GUSTER_BANNER_PATTERN, 10)),
+            List.of(new ClassSkill("pig_burst", "돼지 소환", Material.GUSTER_BANNER_PATTERN, 60)),
             List.of(
                     new Advancement("비스트마스터", Material.WOLF_SPAWN_EGG, NamedTextColor.GREEN,
                             new ClassSkill("beastmaster_2", "두번째 스킬", Material.BORDURE_INDENTED_BANNER_PATTERN, 20),

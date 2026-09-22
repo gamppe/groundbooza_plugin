@@ -1,6 +1,5 @@
 package com.example.magicwar;
 
-import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -26,10 +25,11 @@ public class ClassListener implements Listener {
     private final SkillItem skillItems;
     private final ClassController controller;
     private final SkillEffects effects;
+    private final SkillCooldowns cooldowns;
 
     public ClassListener(MagicWarPlugin plugin, ArenaManager arena, ClassManager classes,
                          ClassGuideItem guide, SkillItem skillItems, ClassController controller,
-                         SkillEffects effects) {
+                         SkillEffects effects, SkillCooldowns cooldowns) {
         this.plugin = plugin;
         this.arena = arena;
         this.classes = classes;
@@ -37,6 +37,7 @@ public class ClassListener implements Listener {
         this.skillItems = skillItems;
         this.controller = controller;
         this.effects = effects;
+        this.cooldowns = cooldowns;
     }
 
     /** Deliberately NOT ignoreCancelled: a right-click on thin air can reach listeners already
@@ -85,17 +86,20 @@ public class ClassListener implements Listener {
             player.sendActionBar(Component.text("아레나에서만 사용할 수 있습니다.", NamedTextColor.RED));
             return;
         }
-        // Cooldown lives on the group, not the item, so every copy of a skill shares it.
-        Key cooldown = SkillItem.cooldownKey(skill);
-        if (player.getCooldown(cooldown) > 0) {
-            player.sendActionBar(Component.text("쿨타임 " + (player.getCooldown(cooldown) / 20 + 1) + "초",
+        // Cooldowns live on the skill, not the item, so every copy of one shares them.
+        if (!cooldowns.ready(player, skill)) {
+            player.sendActionBar(Component.text("쿨타임 " + cooldowns.secondsLeft(player, skill) + "초",
                     NamedTextColor.RED));
             return;
         }
         if (!effects.cast(player, skill)) {
             return;
         }
-        player.setCooldown(cooldown, skill.cooldownSeconds() * 20);
+        int left = cooldowns.consume(player, skill);
+        if (left >= 0) {
+            player.sendActionBar(Component.text(skill.name() + " (" + left + "/" + skill.charges() + ")",
+                    NamedTextColor.AQUA));
+        }
     }
 
     @EventHandler(ignoreCancelled = true)
