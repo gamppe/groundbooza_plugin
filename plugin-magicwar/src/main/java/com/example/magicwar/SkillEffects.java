@@ -16,6 +16,7 @@ import org.bukkit.entity.Projectile;
 import org.bukkit.entity.SmallFireball;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
@@ -23,9 +24,11 @@ import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -62,7 +65,7 @@ public class SkillEffects implements Listener {
     private static final double PIG_SCATTER_LIFT = 0.45;
 
     // ---------- 뇌격 ----------
-    private static final double THUNDER_LEAP = 1.25;
+    private static final double THUNDER_LEAP = 1.9;
     private static final double THUNDER_DASH_SPEED = 1.8;
     /** How far up the dash may be aimed. Look higher than this and it is pulled back down to
      * here, which is what turns an over-eager aim into a dive at the floor. */
@@ -75,7 +78,9 @@ public class SkillEffects implements Listener {
 
     private record Blink(Location target, long expiresAtMillis) {}
 
-    private record Leap(boolean dashed, long startedAtMillis) {}
+    /** {@code leftGround} matters: velocity is applied a tick before the player actually rises,
+     * so without it the very next tick sees them still standing and cancels the whole skill. */
+    private record Leap(boolean dashed, boolean leftGround, long startedAtMillis) {}
 
     private final MagicWarPlugin plugin;
     private final ClassManager classes;
@@ -84,6 +89,8 @@ public class SkillEffects implements Listener {
     private final Random random = new Random();
     private final Map<UUID, Blink> blinks = new HashMap<>();
     private final Map<UUID, Leap> leaps = new HashMap<>();
+    /** Players mid-뇌격, exempt from fall damage until shortly after they touch down. */
+    private final Set<UUID> noFall = new HashSet<>();
 
     public SkillEffects(MagicWarPlugin plugin, ClassManager classes) {
         this.plugin = plugin;
@@ -178,10 +185,6 @@ public class SkillEffects implements Listener {
             }
             return;
         }
-        // A 수도사 marks blocks too - that is how the blink doubles as movement.
-        if (monk && event.getHitBlock() != null) {
-            markBlink(shooter, event.getHitBlock().getLocation().add(0.5, 1, 0.5));
-        }
     }
 
     private void markBlink(Player player, Location target) {
@@ -236,7 +239,8 @@ public class SkillEffects implements Listener {
             return thunderDash(player);
         }
         player.setVelocity(player.getVelocity().setY(THUNDER_LEAP));
-        leaps.put(player.getUniqueId(), new Leap(false, System.currentTimeMillis()));
+        leaps.put(player.getUniqueId(), new Leap(false, false, System.currentTimeMillis()));
+        noFall.add(player.getUniqueId());
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_BREEZE_JUMP, 1f, 0.9f);
         player.sendActionBar(Component.text("공중에서 다시 시전하면 돌진합니다", NamedTextColor.GOLD));
         return true;
@@ -248,6 +252,15 @@ public class SkillEffects implements Listener {
         return leap != null && !leap.dashed() && !player.isOnGround();
     }
 
+    /** The leap is high enough that the landing would otherwise hurt more than the skill does. */
+    @EventHandler(ignoreCancelled = true)
+    public void onFallDamage(EntityDamageEvent event) {
+        if (event.getCause() == EntityDamageEvent.DamageCause.FALL
+                && noFall.contains(event.getEntity().getUniqueId())) {
+            event.setCancelled(true);
+        }
+    }
+
     private boolean thunderDash(Player player) {
         Vector direction = player.getEyeLocation().getDirection().normalize();
         if (direction.getY() > THUNDER_MAX_UPWARD) {
@@ -256,7 +269,9 @@ public class SkillEffects implements Listener {
             direction.normalize();
         }
         player.setVelocity(direction.multiply(THUNDER_DASH_SPEED));
-        leaps.put(player.getUniqueId(), new Leap(true, System.currentTimeMillis()));
+        Leap current = leaps.get(player.getUniqueId());
+        leaps.put(player.getUniqueId(), new Leap(true, current != null && current.leftGround(),
+                System.currentTimeMillis()));
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_WIND_CHARGE_THROW, 1f, 0.8f);
         player.sendActionBar(Component.text("뇌격!", NamedTextColor.GOLD));
         return true;
@@ -275,15 +290,23 @@ public class SkillEffects implements Listener {
                 continue;
             }
             if (!player.isOnGround()) {
+                if (!leap.leftGround()) {
+                    entry.setValue(new Leap(leap.dashed(), true, leap.startedAtMillis()));
+                }
                 if (leap.dashed()) {
                     player.getWorld().spawnParticle(Particle.ELECTRIC_SPARK, player.getLocation(), 3, 0.2, 0.2, 0.2);
                 }
                 continue;
             }
+            if (!leap.leftGround()) {
+                continue; // still on the launch tick - the jump has not started yet
+            }
             it.remove();
             if (leap.dashed()) {
                 thunderLanding(player);
             }
+            // A moment's grace so the slam itself does not hurt the caster.
+            Bukkit.getScheduler().runTaskLater(plugin, () -> noFall.remove(player.getUniqueId()), 10L);
         }
     }
 
@@ -373,5 +396,6 @@ public class SkillEffects implements Listener {
     public void clear() {
         blinks.clear();
         leaps.clear();
+        noFall.clear();
     }
 }
