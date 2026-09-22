@@ -76,7 +76,10 @@ public class SkillEffects implements Listener {
     /** Give up waiting for a landing after this, so nobody is left mid-skill forever. */
     private static final long THUNDER_TIMEOUT_MILLIS = 15000;
 
-    private record Blink(Location target, long expiresAtMillis) {}
+    /** The mark follows the mob rather than the spot it was standing on, so a target that runs
+     * during the three seconds is still where the blink lands. {@code lastKnown} is only there
+     * for the case where it dies or despawns before the follow-up. */
+    private record Blink(UUID targetId, Location lastKnown, long expiresAtMillis) {}
 
     /** {@code leftGround} matters: velocity is applied a tick before the player actually rises,
      * so without it the very next tick sees them still standing and cancels the whole skill. */
@@ -177,7 +180,7 @@ public class SkillEffects implements Listener {
             target.getWorld().playSound(target.getLocation(), Sound.ENTITY_WIND_CHARGE_WIND_BURST, 1f, 1.3f);
 
             if (monk) {
-                markBlink(shooter, target.getLocation());
+                markBlink(shooter, target);
             } else {
                 // Landing the hit is what pays out, so a miss gives nothing.
                 shooter.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, WAVE_SHOT_REWARD_TICKS, 0));
@@ -187,8 +190,9 @@ public class SkillEffects implements Listener {
         }
     }
 
-    private void markBlink(Player player, Location target) {
-        blinks.put(player.getUniqueId(), new Blink(target.clone(), System.currentTimeMillis() + BLINK_WINDOW_MILLIS));
+    private void markBlink(Player player, LivingEntity target) {
+        blinks.put(player.getUniqueId(), new Blink(target.getUniqueId(), target.getLocation().clone(),
+                System.currentTimeMillis() + BLINK_WINDOW_MILLIS));
         player.playSound(player, Sound.BLOCK_BEACON_ACTIVATE, 0.7f, 1.8f);
         player.sendActionBar(Component.text("3초 내로 다시 시전하면 그 자리로 이동합니다", NamedTextColor.GOLD));
     }
@@ -205,13 +209,22 @@ public class SkillEffects implements Listener {
         return true;
     }
 
+    /** Where the marked mob is now, falling back to where it was hit if it is gone. */
+    private Location currentPositionOf(Blink blink) {
+        Entity marked = Bukkit.getEntity(blink.targetId());
+        if (marked instanceof LivingEntity alive && alive.isValid()) {
+            return alive.getLocation().clone();
+        }
+        return blink.lastKnown();
+    }
+
     private boolean blinkStrike(Player player) {
         Blink blink = blinks.remove(player.getUniqueId());
         if (blink == null) {
             return false;
         }
-        Location target = blink.target();
-        if (!target.getWorld().equals(player.getWorld())) {
+        Location target = currentPositionOf(blink);
+        if (target == null || !target.getWorld().equals(player.getWorld())) {
             return false;
         }
         Location from = player.getLocation();
