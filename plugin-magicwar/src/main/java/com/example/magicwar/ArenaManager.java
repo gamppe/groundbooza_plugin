@@ -2,16 +2,21 @@ package com.example.magicwar;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.title.Title;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.WorldBorder;
 import org.bukkit.WorldCreator;
 import org.bukkit.WorldType;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.MapMeta;
+import org.bukkit.map.MapView;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -46,6 +51,8 @@ public class ArenaManager {
 
     private Phase phase = Phase.IDLE;
     private World arena;
+    /** The round's map item, handed out at the teleport; null when give-map is off. */
+    private ItemStack arenaMap;
 
     public ArenaManager(MagicWarPlugin plugin, RoundSettings settings) {
         this.plugin = plugin;
@@ -135,6 +142,30 @@ public class ArenaManager {
         border.setWarningDistance(settings.warningDistance);
         world.setKeepSpawnInMemory(false);
         arena = world;
+        arenaMap = settings.giveMap ? createArenaMap(world) : null;
+    }
+
+    /** One filled map per round, centred on the arena at the widest zoom, with the border
+     * painted over the terrain by BorderMapRenderer. */
+    private ItemStack createArenaMap(World world) {
+        MapView view = Bukkit.createMap(world);
+        view.setScale(MapView.Scale.FARTHEST);
+        view.setCenterX(0);
+        view.setCenterZ(0);
+        view.setTrackingPosition(true);
+        view.setUnlimitedTracking(false);
+        view.setLocked(false);
+        view.addRenderer(new BorderMapRenderer());
+
+        ItemStack item = new ItemStack(Material.FILLED_MAP);
+        MapMeta meta = (MapMeta) item.getItemMeta();
+        meta.setMapView(view);
+        meta.displayName(Component.text("아레나 지도", NamedTextColor.GOLD)
+                .decoration(TextDecoration.ITALIC, false));
+        meta.lore(List.of(Component.text("보라색 선이 현재 경계입니다", NamedTextColor.GRAY)
+                .decoration(TextDecoration.ITALIC, false)));
+        item.setItemMeta(meta);
+        return item;
     }
 
     // ---------- grace period ----------
@@ -152,6 +183,9 @@ public class ArenaManager {
             player.teleport(spawn);
             player.setGameMode(GameMode.SURVIVAL);
             player.setInvulnerable(true);
+            if (settings.giveMap) {
+                player.getInventory().addItem(arenaMap.clone());
+            }
             player.showTitle(Title.title(
                     Component.text("준비 시간", NamedTextColor.AQUA),
                     Component.text(minutes(settings.graceSeconds) + " 동안 무적입니다", NamedTextColor.GRAY),
@@ -304,6 +338,7 @@ public class ArenaManager {
         }
         World finished = arena;
         arena = null;
+        arenaMap = null;
         File folder = finished.getWorldFolder();
         if (!Bukkit.unloadWorld(finished, false)) {
             plugin.getLogger().warning("Could not unload " + finished.getName() + "; it stays on disk until restart.");

@@ -17,6 +17,7 @@ public class RoundSettings {
     public final String lobbyWorld;
     public final String arenaPrefix;
     public final int countdownSeconds;
+    public final boolean giveMap;
     public final int graceSeconds;
     public final int borderHalfWidth;
     public final double damagePerBlock;
@@ -29,6 +30,7 @@ public class RoundSettings {
         this.lobbyWorld = config.getString("lobby-world", "world");
         this.arenaPrefix = config.getString("arena-prefix", "arena_");
         this.countdownSeconds = config.getInt("countdown-seconds", 10);
+        this.giveMap = config.getBoolean("give-map", true);
         this.graceSeconds = config.getInt("grace-seconds", 300);
         this.borderHalfWidth = config.getInt("border.half-width", 999);
         this.damagePerBlock = config.getDouble("border.damage-per-block", 1.0);
