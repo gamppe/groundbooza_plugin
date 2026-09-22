@@ -7,5 +7,35 @@ arena-prefix: "arena_"
 
 countdown-seconds: 10
 
-# 아레나 월드 경계. -<half> ~ +<half> 정사각형이 됩니다 (999 → -999..999).
-border-half-width: 999
+# 생성한 아레나에 바다가 너무 많으면 시드를 바꿔 다시 만듭니다. 시도할 때마다 월드를 통째로
+# 생성하므로 (메인 스레드가 그만큼 멈춥니다) max-attempts 는 낮게 두는 편이 낫습니다.
+# 0 이나 false 로 두면 검사 없이 처음 만든 월드를 그대로 씁니다.
+terrain:
+  avoid-ocean: true
+  # 경계 안을 격자로 찍어 바다 바이옴 비율을 잽니다. 이 비율을 넘으면 다시 만듭니다.
+  max-ocean-percent: 20
+  # 격자 한 변의 표본 수 (5 → 25곳). 표본 하나마다 청크가 하나 생성됩니다.
+  samples-per-side: 5
+  max-attempts: 3
+
+# 아레나에 도착한 뒤 무적으로 보내는 준비 시간(초). 이 시간이 끝나야 전투와 경계 축소가 시작됩니다.
+grace-seconds: 300
+
+border:
+  # -<half> ~ +<half> 정사각형이 됩니다 (999 → -999..999).
+  half-width: 999
+  # 경계 밖에서 1블록당 1초에 입는 피해(하트 반칸 = 1.0). 바닐라 기본은 0.2 로 훨씬 약합니다.
+  damage-per-block: 1.0
+  # 경계 밖 이 거리까지는 피해가 없습니다.
+  damage-buffer: 1.0
+  # 경계가 이 거리 안으로 들어오면 화면이 붉어집니다.
+  warning-distance: 30
+
+# 전투 시작 후 경계가 줄어드는 순서. wait 초만큼 기다렸다가 to 크기까지 over 초에 걸쳐 줄입니다.
+# to 는 지름입니다 (1998 = -999..999, 40 = -20..20).
+shrink-stages:
+  - { wait: 120, to: 1200, over: 90 }
+  - { wait: 90,  to: 700,  over: 75 }
+  - { wait: 75,  to: 350,  over: 60 }
+  - { wait: 60,  to: 150,  over: 45 }
+  - { wait: 45,  to: 40,   over: 40 }

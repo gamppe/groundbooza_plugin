@@ -17,11 +17,7 @@ public class MagicWarPlugin extends JavaPlugin {
         saveDefaultConfig();
         FileConfiguration config = getConfig();
 
-        this.arenaManager = new ArenaManager(this,
-                config.getString("lobby-world", "world"),
-                config.getString("arena-prefix", "arena_"),
-                config.getInt("countdown-seconds", 10),
-                config.getInt("border-half-width", 999));
+        this.arenaManager = new ArenaManager(this, new RoundSettings(config));
 
         // A crash or a /stop mid-round leaves the last arena on disk; nothing holds it open
         // at enable time, so this is the one moment deleting it is guaranteed to work.
