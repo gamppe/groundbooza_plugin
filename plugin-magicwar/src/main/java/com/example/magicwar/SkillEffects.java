@@ -4,8 +4,11 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
+import org.bukkit.block.Block;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.Sound;
 import org.bukkit.entity.BreezeWindCharge;
 import org.bukkit.entity.Entity;
@@ -75,6 +78,8 @@ public class SkillEffects implements Listener {
     private static final int THUNDER_SLOW_TICKS = 3 * 20;
     /** Give up waiting for a landing after this, so nobody is left mid-skill forever. */
     private static final long THUNDER_TIMEOUT_MILLIS = 15000;
+    private static final int DUST_RING_POINTS = 16;
+    private static final double DUST_RING_RADIUS = 2.2;
 
     /** The mark follows the mob rather than the spot it was standing on, so a target that runs
      * during the three seconds is still where the blink lands. {@code lastKnown} is only there
@@ -374,6 +379,7 @@ public class SkillEffects implements Listener {
         at.getWorld().strikeLightningEffect(at);
         at.getWorld().spawnParticle(Particle.ELECTRIC_SPARK, at.clone().add(0, 1, 0), 60, 1.5, 0.5, 1.5, 0.2);
         at.getWorld().playSound(at, Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 1f, 1.2f);
+        kickUpDust(at);
 
         for (Entity nearby : player.getNearbyEntities(THUNDER_LAND_RADIUS, THUNDER_LAND_RADIUS, THUNDER_LAND_RADIUS)) {
             if (nearby instanceof LivingEntity victim && !victim.equals(player)) {
@@ -382,6 +388,24 @@ public class SkillEffects implements Listener {
                 victim.getWorld().strikeLightningEffect(victim.getLocation());
             }
         }
+    }
+
+    /** Debris off whatever was actually landed on, so a slam into sand throws sand. DUST_PILLAR
+     * is the mace-smash column; the ring of BLOCK around it is the spray. */
+    private void kickUpDust(Location at) {
+        Block floor = at.clone().subtract(0, 1, 0).getBlock();
+        if (floor.getType().isAir()) {
+            floor = at.getBlock(); // landed on something thin - use what is underfoot instead
+        }
+        BlockData data = floor.getType().isAir() ? Material.DIRT.createBlockData() : floor.getBlockData();
+
+        at.getWorld().spawnParticle(Particle.DUST_PILLAR, at, 60, 1.2, 0.1, 1.2, 0.0, data);
+        for (int i = 0; i < DUST_RING_POINTS; i++) {
+            double angle = Math.PI * 2 * i / DUST_RING_POINTS;
+            Location edge = at.clone().add(Math.cos(angle) * DUST_RING_RADIUS, 0.1, Math.sin(angle) * DUST_RING_RADIUS);
+            at.getWorld().spawnParticle(Particle.BLOCK, edge, 10, 0.3, 0.2, 0.3, 0.12, data);
+        }
+        at.getWorld().playSound(at, Sound.ENTITY_GENERIC_EXPLODE, 0.7f, 0.6f);
     }
 
     // ---------- 소서러 1 : 볼트마법 ----------
