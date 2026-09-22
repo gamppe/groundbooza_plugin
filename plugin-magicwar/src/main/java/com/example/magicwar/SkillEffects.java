@@ -68,6 +68,7 @@ public class SkillEffects implements Listener {
      * here, which is what turns an over-eager aim into a dive at the floor. */
     private static final double THUNDER_MAX_UPWARD = 0.25;
     private static final double THUNDER_LAND_RADIUS = 5.0;
+    private static final double THUNDER_LAND_DAMAGE = 5.0;
     private static final int THUNDER_SLOW_TICKS = 3 * 20;
     /** Give up waiting for a landing after this, so nobody is left mid-skill forever. */
     private static final long THUNDER_TIMEOUT_MILLIS = 15000;
@@ -286,8 +287,8 @@ public class SkillEffects implements Listener {
         }
     }
 
-    /** Lightning is struck for effect only - the real payload is the slow, and a real bolt would
-     * set the arena on fire. */
+    /** Lightning is struck for effect only - the damage and the slow are applied by hand, since
+     * a real bolt would also set the arena on fire. */
     private void thunderLanding(Player player) {
         Location at = player.getLocation();
         at.getWorld().strikeLightningEffect(at);
@@ -296,6 +297,7 @@ public class SkillEffects implements Listener {
 
         for (Entity nearby : player.getNearbyEntities(THUNDER_LAND_RADIUS, THUNDER_LAND_RADIUS, THUNDER_LAND_RADIUS)) {
             if (nearby instanceof LivingEntity victim && !victim.equals(player)) {
+                victim.damage(THUNDER_LAND_DAMAGE, player);
                 victim.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, THUNDER_SLOW_TICKS, 1));
                 victim.getWorld().strikeLightningEffect(victim.getLocation());
             }
