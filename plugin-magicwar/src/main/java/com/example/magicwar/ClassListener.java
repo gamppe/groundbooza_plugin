@@ -91,6 +91,59 @@ public class ClassListener implements Listener {
         player.setCooldown(item, skill.cooldownSeconds() * 20);
     }
 
+    @EventHandler(ignoreCancelled = true)
+    public void onSelectClick(InventoryClickEvent event) {
+        if (!(event.getView().getTopInventory().getHolder() instanceof ClassSelectHolder)) {
+            return;
+        }
+        event.setCancelled(true);
+        if (!(event.getWhoClicked() instanceof Player player)
+                || event.getClickedInventory() != event.getView().getTopInventory()) {
+            return;
+        }
+        ClassSelectHolder holder = (ClassSelectHolder) event.getView().getTopInventory().getHolder();
+        MagicClass base = classes.classOf(player.getUniqueId());
+        int total = holder.isAdvancing()
+                ? (base == null ? 0 : base.advancements().size())
+                : MagicClass.values().length;
+        int index = ClassSelectHolder.indexForSlot(event.getSlot(), total);
+        if (index < 0) {
+            return;
+        }
+        if (holder.isAdvancing()) {
+            controller.advance(player, index);
+        } else {
+            controller.choose(player, index);
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onUpgradeClick(InventoryClickEvent event) {
+        if (!(event.getView().getTopInventory().getHolder() instanceof ClassUpgradeHolder)) {
+            return;
+        }
+        event.setCancelled(true);
+        if (!(event.getWhoClicked() instanceof Player player)
+                || event.getClickedInventory() != event.getView().getTopInventory()) {
+            return;
+        }
+        if (event.getSlot() == ClassUpgradeHolder.SLOT_ADVANCE) {
+            if (classes.hasAdvanced(player.getUniqueId())) {
+                return;
+            }
+            if (!controller.advancementUnlocked(player.getUniqueId())) {
+                player.sendActionBar(Component.text("전직 퀘스트를 먼저 완료하세요.", NamedTextColor.RED));
+                return;
+            }
+            controller.openAdvance(player);
+            return;
+        }
+        int quest = ClassUpgradeHolder.questForSlot(event.getSlot());
+        if (quest >= 0) {
+            controller.claim(player, quest);
+        }
+    }
+
     private ClassSkill advancedSkill(Player player) {
         MagicClass.Advancement advancement = classes.advancementOf(player.getUniqueId());
         return advancement == null ? null : advancement.skill();
