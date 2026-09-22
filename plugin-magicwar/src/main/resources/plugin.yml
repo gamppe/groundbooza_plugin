@@ -1,0 +1,14 @@
+name: MagicWar
+version: 1.0.0
+main: com.example.magicwar.MagicWarPlugin
+api-version: '26.2'
+author: MagicWar
+commands:
+  마법전쟁:
+    description: 마법전쟁 라운드 진행 (시작 / 중지)
+    usage: /마법전쟁 <시작|중지>
+    permission: magicwar.admin
+permissions:
+  magicwar.admin:
+    description: 라운드를 시작하고 중지할 수 있습니다
+    default: op

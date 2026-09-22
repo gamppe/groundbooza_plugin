@@ -1,0 +1,11 @@
+# 로비 월드 이름. server.properties 의 level-name 과 같아야 합니다.
+lobby-world: "world"
+
+# 라운드마다 새로 만들어지는 아레나 월드 폴더의 접두사. 실제 이름은 arena_<시각> 이 되고,
+# 서버를 켤 때와 라운드를 정리할 때 이 접두사로 시작하는 낡은 폴더를 지웁니다.
+arena-prefix: "arena_"
+
+countdown-seconds: 10
+
+# 아레나 월드 경계. -<half> ~ +<half> 정사각형이 됩니다 (999 → -999..999).
+border-half-width: 999
