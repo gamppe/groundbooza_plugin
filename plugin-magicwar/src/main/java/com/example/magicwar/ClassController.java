@@ -21,11 +21,13 @@ public class ClassController {
     private final MagicWarPlugin plugin;
     private final ClassManager classes;
     private final ClassGuideItem guide;
+    private final SkillItem skills;
 
-    public ClassController(MagicWarPlugin plugin, ClassManager classes, ClassGuideItem guide) {
+    public ClassController(MagicWarPlugin plugin, ClassManager classes, ClassGuideItem guide, SkillItem skills) {
         this.plugin = plugin;
         this.classes = classes;
         this.guide = guide;
+        this.skills = skills;
     }
 
     /** The guide, /클래스 and the round start all come through here: picker first, upgrades
@@ -96,6 +98,9 @@ public class ClassController {
     public void choose(Player player, MagicClass magicClass) {
         classes.choose(player.getUniqueId(), magicClass);
         guide.refresh(player, magicClass);
+        for (int i = 0; i < magicClass.skills().size(); i++) {
+            player.getInventory().addItem(skills.create(magicClass, i));
+        }
         player.playSound(player, Sound.BLOCK_ENCHANTMENT_TABLE_USE, 1f, 1.2f);
         player.sendMessage(Component.text(magicClass.label() + " 클래스를 선택했습니다.", NamedTextColor.GREEN));
         Bukkit.getScheduler().runTask(plugin, () -> openUpgrades(player));
