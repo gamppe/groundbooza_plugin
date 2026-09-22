@@ -270,18 +270,38 @@ public class ArenaManager {
         pendingSize = to;
         pendingZone = true;
 
-        announce(Component.text("[경고] " + number + "차 자기장이 " + describe(warnSeconds)
-                + " 뒤에 좁혀집니다. 중심 (" + (int) pendingCenterX + ", " + (int) pendingCenterZ
-                + "), 크기 " + (int) to, NamedTextColor.YELLOW));
         for (Player player : Bukkit.getOnlinePlayers()) {
             if (player.getWorld().equals(arena)) {
-                player.showTitle(Title.title(
-                        Component.text("자기장 경고", NamedTextColor.YELLOW),
-                        Component.text(describe(warnSeconds) + " 뒤 축소 시작", NamedTextColor.GRAY),
-                        Title.Times.times(Duration.ofMillis(200), Duration.ofSeconds(3), Duration.ofMillis(500))));
                 player.playSound(player, Sound.BLOCK_NOTE_BLOCK_PLING, 1f, 0.6f);
             }
         }
+        countDownOnActionBar(number, to, warnSeconds);
+    }
+
+    /** The warning lives on the action bar, and an action bar fades after a few seconds - so it
+     * is rewritten every second for the whole escape window, counting down as it goes. */
+    private void countDownOnActionBar(int number, double to, int warnSeconds) {
+        track(new BukkitRunnable() {
+            int left = warnSeconds;
+
+            @Override
+            public void run() {
+                if (arena == null || left <= 0) {
+                    cancel();
+                    return;
+                }
+                Component line = Component.text("[경고] ", NamedTextColor.RED)
+                        .append(Component.text(number + "차 자기장 축소까지 " + minutes(left), NamedTextColor.YELLOW))
+                        .append(Component.text("  ·  중심 (" + (int) pendingCenterX + ", " + (int) pendingCenterZ
+                                + ")  ·  크기 " + (int) to, NamedTextColor.GRAY));
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    if (player.getWorld().equals(arena)) {
+                        player.sendActionBar(line);
+                    }
+                }
+                left--;
+            }
+        }.runTaskTimer(plugin, 0L, 20L));
     }
 
     private void startShrink(double from, double to, int overSeconds) {
