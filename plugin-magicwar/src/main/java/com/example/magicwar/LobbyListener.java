@@ -6,13 +6,14 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 
-/** Keeps the lobby read-only: adventure mode on arrival, and block edits refused outright for
- * anyone who is not in creative (adventure already blocks them - this also covers a player an
- * admin left in survival). */
+/** Keeps the lobby read-only and empty: adventure mode on arrival, block edits refused for
+ * anyone not in creative (adventure already blocks them - this also covers a player an admin
+ * left in survival), and no mob ever spawning. */
 public class LobbyListener implements Listener {
 
     private final ArenaManager arena;
@@ -43,6 +44,15 @@ public class LobbyListener implements Listener {
             if (lobby != null) {
                 event.setRespawnLocation(lobby.getSpawnLocation());
             }
+        }
+    }
+
+    /** Nothing living spawns in the lobby, whatever the source - the gamerule only covers
+     * natural spawning, and this also catches spawners, spawn eggs and plugin spawns. */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onSpawn(CreatureSpawnEvent event) {
+        if (arena.isLobby(event.getLocation().getWorld())) {
+            event.setCancelled(true);
         }
     }
 

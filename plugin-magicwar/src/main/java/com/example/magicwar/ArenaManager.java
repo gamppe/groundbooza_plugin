@@ -5,7 +5,9 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.title.Title;
 import org.bukkit.Bukkit;
+import org.bukkit.Difficulty;
 import org.bukkit.GameMode;
+import org.bukkit.GameRule;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Sound;
@@ -45,6 +47,9 @@ public class ArenaManager {
 
     private enum Phase { IDLE, COUNTDOWN, GRACE, FIGHT }
 
+    /** Mid-morning: bright, with the sun off to one side rather than flat overhead. */
+    private static final long LOBBY_TIME = 6000L;
+
     private final MagicWarPlugin plugin;
     private final RoundSettings settings;
     private final ClassManager classes;
@@ -72,6 +77,21 @@ public class ArenaManager {
         this.classes = classes;
         this.quests = quests;
         this.guide = guide;
+    }
+
+    /** The lobby is scenery, not a place to fight: no mobs, and the sun never moves. The
+     * gamerule stops natural spawning; LobbyListener catches everything else (spawners, eggs,
+     * plugin spawns). Called once the worlds are up. */
+    public void applyLobbyRules() {
+        World lobby = lobby();
+        if (lobby == null) {
+            plugin.getLogger().warning("Lobby world '" + settings.lobbyWorld + "' not found - rules not applied.");
+            return;
+        }
+        lobby.setGameRule(GameRule.DO_MOB_SPAWNING, false);
+        lobby.setGameRule(GameRule.DO_DAYLIGHT_CYCLE, false);
+        lobby.setTime(LOBBY_TIME);
+        lobby.setDifficulty(Difficulty.PEACEFUL);
     }
 
     /** Everyone still standing in the arena - what the sidebar counts. */
@@ -165,6 +185,7 @@ public class ArenaManager {
             plugin.getLogger().warning("Arena world creation returned null: " + name);
             return;
         }
+        world.setDifficulty(Difficulty.HARD);
         var border = world.getWorldBorder();
         border.setCenter(0.5, 0.5);
         border.setSize(settings.fullSize());

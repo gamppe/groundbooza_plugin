@@ -34,6 +34,7 @@ public class MagicWarPlugin extends JavaPlugin {
         // A crash or a /stop mid-round leaves the last arena on disk; nothing holds it open
         // at enable time, so this is the one moment deleting it is guaranteed to work.
         arenaManager.deleteLeftoverArenas();
+        arenaManager.applyLobbyRules();
 
         MagicWarCommand command = new MagicWarCommand(arenaManager);
         getCommand("마법전쟁").setExecutor(command);
