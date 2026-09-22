@@ -16,19 +16,25 @@ import java.awt.Color;
  * default renderer already put down.
  *
  * <p>At {@link MapView.Scale#FARTHEST} one pixel is 16 blocks, so a 128x128 map covers
- * 2048x2048 - just enough for a 1998-wide arena.
+ * 2048x2048 - just enough for a 1998-wide arena. The white ring is the zone the last warning
+ * announced; the purple one is the wall as it stands.
  */
 public class BorderMapRenderer extends MapRenderer {
 
     private static final int SIZE = 128;
     private static final Color WALL = new Color(190, 60, 255);
     private static final Color WALL_EDGE = new Color(120, 0, 190);
+    /** The ring a warning has announced but the wall has not started moving to yet. */
+    private static final Color PENDING = new Color(255, 255, 255);
 
     /** Blocks per pixel at the scale this renderer expects. */
     private static final int BLOCKS_PER_PIXEL = 16;
 
-    public BorderMapRenderer() {
+    private final ArenaManager arena;
+
+    public BorderMapRenderer(ArenaManager arena) {
         super(true); // per-player: everyone sees the border from their own map
+        this.arena = arena;
     }
 
     @Override
@@ -49,6 +55,17 @@ public class BorderMapRenderer extends MapRenderer {
         // A two-pixel wall: thin lines vanish against the terrain at this zoom.
         drawRect(canvas, left, top, right, bottom, WALL);
         drawRect(canvas, left - 1, top - 1, right + 1, bottom + 1, WALL_EDGE);
+
+        // Where the wall is about to go, so the warning tells players which way to run.
+        double[] pending = arena.pendingZone();
+        if (pending != null) {
+            double pendingHalf = pending[2] / 2;
+            drawRect(canvas,
+                    toPixel(pending[0] - pendingHalf, view.getCenterX()),
+                    toPixel(pending[1] - pendingHalf, view.getCenterZ()),
+                    toPixel(pending[0] + pendingHalf, view.getCenterX()),
+                    toPixel(pending[1] + pendingHalf, view.getCenterZ()), PENDING);
+        }
     }
 
     /** World coordinate to map pixel. The map's own centre sits at pixel 64. */

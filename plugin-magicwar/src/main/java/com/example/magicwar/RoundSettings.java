@@ -10,9 +10,10 @@ import java.util.Map;
 /** Everything config.yml says about how a round runs, read once at enable. */
 public class RoundSettings {
 
-    /** One step of the shrinking border: hold for {@code waitSeconds}, then take
-     * {@code overSeconds} to close in to {@code toSize} blocks across. */
-    public record ShrinkStage(int waitSeconds, double toSize, int overSeconds) {}
+    /** One step of the shrinking border: hold for {@code waitSeconds}, warn the players and
+     * give them {@code warnSeconds} to move, then take {@code overSeconds} to close in to
+     * {@code toSize} blocks across. */
+    public record ShrinkStage(int waitSeconds, int warnSeconds, double toSize, int overSeconds) {}
 
     public final String lobbyWorld;
     public final String arenaPrefix;
@@ -50,23 +51,26 @@ public class RoundSettings {
         List<ShrinkStage> stages = new ArrayList<>();
         for (Object raw : config.getList("shrink-stages", List.of())) {
             int wait;
+            int warn;
             double to;
             int over;
             if (raw instanceof ConfigurationSection section) {
                 wait = section.getInt("wait", -1);
+                warn = section.getInt("warn", 0);
                 to = section.getDouble("to", -1);
                 over = section.getInt("over", -1);
             } else if (raw instanceof Map<?, ?> map) {
                 wait = asInt(map.get("wait"), -1);
+                warn = asInt(map.get("warn"), 0);
                 to = asDouble(map.get("to"), -1);
                 over = asInt(map.get("over"), -1);
             } else {
                 continue;
             }
-            if (wait < 0 || to <= 0 || over < 0) {
+            if (wait < 0 || warn < 0 || to <= 0 || over < 0) {
                 continue;
             }
-            stages.add(new ShrinkStage(wait, to, over));
+            stages.add(new ShrinkStage(wait, warn, to, over));
         }
         return List.copyOf(stages);
     }

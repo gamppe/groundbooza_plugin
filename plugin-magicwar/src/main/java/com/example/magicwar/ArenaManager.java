@@ -53,6 +53,11 @@ public class ArenaManager {
     private World arena;
     /** The round's map item, handed out at the teleport; null when give-map is off. */
     private ItemStack arenaMap;
+    /** The ring announced by the last warning, drawn on the map until the wall starts moving. */
+    private boolean pendingZone;
+    private double pendingCenterX;
+    private double pendingCenterZ;
+    private double pendingSize;
 
     public ArenaManager(MagicWarPlugin plugin, RoundSettings settings) {
         this.plugin = plugin;
@@ -155,7 +160,7 @@ public class ArenaManager {
         view.setTrackingPosition(true);
         view.setUnlimitedTracking(false);
         view.setLocked(false);
-        view.addRenderer(new BorderMapRenderer());
+        view.addRenderer(new BorderMapRenderer(this));
 
         ItemStack item = new ItemStack(Material.FILLED_MAP);
         MapMeta meta = (MapMeta) item.getItemMeta();
@@ -222,18 +227,60 @@ public class ArenaManager {
     }
 
     /** Lays the whole shrink schedule out up front as one-shot tasks; each stage's delay is the
-     * sum of everything before it, so a slow tick never lets two stages overlap. */
+     * sum of everything before it, so a slow tick never lets two stages overlap. Every stage is
+     * two tasks: the warning, then the shrink itself once the escape window has passed. */
     private void scheduleShrinkStages() {
         long delaySeconds = 0;
         double sizeBefore = settings.fullSize();
+        int number = 0;
         for (RoundSettings.ShrinkStage stage : settings.shrinkStages) {
+            number++;
             delaySeconds += stage.waitSeconds();
             double from = sizeBefore;
             double to = stage.toSize();
+            int warn = stage.warnSeconds();
             int over = stage.overSeconds();
-            track(Bukkit.getScheduler().runTaskLater(plugin, () -> startShrink(from, to, over), delaySeconds * 20L));
+            int label = number;
+            track(Bukkit.getScheduler().runTaskLater(plugin,
+                    () -> warnShrink(label, from, to, warn), delaySeconds * 20L));
+            delaySeconds += warn;
+            track(Bukkit.getScheduler().runTaskLater(plugin,
+                    () -> startShrink(from, to, over), delaySeconds * 20L));
             delaySeconds += over;
             sizeBefore = to;
+        }
+    }
+
+    /** Announces the next ring and, when the centre moves, picks it now rather than at the
+     * shrink: a warning is only worth giving if it says where to run. The chosen ring is what
+     * the map draws as the pending zone until the wall actually starts moving. */
+    private void warnShrink(int number, double from, double to, int warnSeconds) {
+        if (arena == null) {
+            return;
+        }
+        Location current = arena.getWorldBorder().getCenter();
+        if (settings.randomCenter) {
+            double[] target = pickCenter(current.getX(), current.getZ(), from / 2, to / 2);
+            pendingCenterX = target[0];
+            pendingCenterZ = target[1];
+        } else {
+            pendingCenterX = current.getX();
+            pendingCenterZ = current.getZ();
+        }
+        pendingSize = to;
+        pendingZone = true;
+
+        announce(Component.text("[경고] " + number + "차 자기장이 " + describe(warnSeconds)
+                + " 뒤에 좁혀집니다. 중심 (" + (int) pendingCenterX + ", " + (int) pendingCenterZ
+                + "), 크기 " + (int) to, NamedTextColor.YELLOW));
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (player.getWorld().equals(arena)) {
+                player.showTitle(Title.title(
+                        Component.text("자기장 경고", NamedTextColor.YELLOW),
+                        Component.text(describe(warnSeconds) + " 뒤 축소 시작", NamedTextColor.GRAY),
+                        Title.Times.times(Duration.ofMillis(200), Duration.ofSeconds(3), Duration.ofMillis(500))));
+                player.playSound(player, Sound.BLOCK_NOTE_BLOCK_PLING, 1f, 0.6f);
+            }
         }
     }
 
@@ -245,11 +292,12 @@ public class ArenaManager {
         border.setSize(to, overSeconds);
 
         Component where = Component.empty();
-        if (settings.randomCenter) {
+        if (pendingZone) {
             Location current = border.getCenter();
-            double[] target = pickCenter(current.getX(), current.getZ(), from / 2, to / 2);
-            slideCenter(border, current.getX(), current.getZ(), target[0], target[1], overSeconds);
-            where = Component.text(" · 중심 (" + (int) target[0] + ", " + (int) target[1] + ")", NamedTextColor.YELLOW);
+            slideCenter(border, current.getX(), current.getZ(), pendingCenterX, pendingCenterZ, overSeconds);
+            where = Component.text(" · 중심 (" + (int) pendingCenterX + ", " + (int) pendingCenterZ + ")",
+                    NamedTextColor.YELLOW);
+            pendingZone = false; // the wall is on its way there now; stop drawing it as pending
         }
         announce(Component.text("경계가 좁혀집니다: " + (int) from + " → " + (int) to
                 + " (" + overSeconds + "초)", NamedTextColor.GOLD).append(where));
@@ -339,6 +387,7 @@ public class ArenaManager {
         World finished = arena;
         arena = null;
         arenaMap = null;
+        pendingZone = false;
         File folder = finished.getWorldFolder();
         if (!Bukkit.unloadWorld(finished, false)) {
             plugin.getLogger().warning("Could not unload " + finished.getName() + "; it stays on disk until restart.");
@@ -405,6 +454,16 @@ public class ArenaManager {
             plugin.getLogger().warning("Could not delete " + root + ": " + e.getMessage());
             return false;
         }
+    }
+
+    /** Where the next ring will be, or null when no warning is outstanding.
+     * {@code [centreX, centreZ, size]}. */
+    public double[] pendingZone() {
+        return pendingZone ? new double[]{pendingCenterX, pendingCenterZ, pendingSize} : null;
+    }
+
+    private static String describe(int seconds) {
+        return minutes(seconds);
     }
 
     private static String minutes(int seconds) {
