@@ -10,6 +10,7 @@ public class ServerBridgePlugin extends JavaPlugin {
     private int boxSize;
     private String boxTitle;
     private String targetServer;
+    private String serverName;
 
     @Override
     public void onEnable() {
@@ -19,30 +20,46 @@ public class ServerBridgePlugin extends JavaPlugin {
         this.boxSize = config.getInt("box.size", 27);
         this.boxTitle = config.getString("box.title", "개인 상자");
         this.targetServer = config.getString("target-server", "main");
+        this.serverName = config.getString("server-name", "");
+        boolean boxEnabled = config.getBoolean("features.box", true);
+        boolean jobsEnabled = config.getBoolean("features.standalone-jobs", true);
 
-        String host = config.getString("mysql.host", "127.0.0.1");
-        int port = config.getInt("mysql.port", 3306);
-        String database = config.getString("mysql.database", "mc_serverbridge");
-        String user = config.getString("mysql.user", "root");
-        String password = config.getString("mysql.password", "");
-
-        this.databaseManager = new DatabaseManager(getLogger(), host, port, database, user, password);
+        // Both the box and the cross-schema job lookup need MySQL; a server running neither
+        // (the 마법전쟁 event server) should not open a pool at all.
+        if (boxEnabled || jobsEnabled) {
+            String host = config.getString("mysql.host", "127.0.0.1");
+            int port = config.getInt("mysql.port", 3306);
+            String database = config.getString("mysql.database", "mc_serverbridge");
+            String user = config.getString("mysql.user", "root");
+            String password = config.getString("mysql.password", "");
+            this.databaseManager = new DatabaseManager(getLogger(), host, port, database, user, password);
+        }
 
         getServer().getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
 
-        getCommand("파밍상자").setExecutor(new BoxCommand(this));
-        getCommand("파밍이동").setExecutor(new SwitchCommand(this));
+        // Whisper and the switch commands are the one thing every backend gets, however
+        // little else it runs - that is what makes a bare event server feel connected.
         WhisperCommand whisperCommand = new WhisperCommand(this);
         getCommand("귓속말").setExecutor(whisperCommand);
         getCommand("귓속말").setTabCompleter(whisperCommand);
         getServer().getMessenger().registerIncomingPluginChannel(this, "BungeeCord", whisperCommand);
+        getCommand("마법전쟁서버").setExecutor(
+                new ConnectCommand(this, config.getString("servers.magic", "magic"), "마법전쟁"));
+        getCommand("땅부자서버").setExecutor(
+                new ConnectCommand(this, config.getString("servers.main", "main"), "땅 부자 타이쿤"));
 
-        getServer().getPluginManager().registerEvents(new BoxListener(this), this);
+        if (boxEnabled) {
+            getCommand("파밍상자").setExecutor(new BoxCommand(this));
+            getCommand("파밍이동").setExecutor(new SwitchCommand(this));
+            getServer().getPluginManager().registerEvents(new BoxListener(this), this);
+        } else {
+            disable("파밍상자", "파밍이동");
+        }
 
         // MainCore (main-server only) already runs the richer, land-protection-aware version of
         // these abilities - registering both would double every effect (till twice, drop items
         // twice, etc.), so this simpler copy only activates where MainCore is absent.
-        if (getServer().getPluginManager().getPlugin("MainCore") == null) {
+        if (jobsEnabled && getServer().getPluginManager().getPlugin("MainCore") == null) {
             // Job data is read straight out of MainCore's schema so job-locked tools and the
             // player-side job abilities behave the same over here.
             JobCache jobs = new JobCache(this, config.getString("jobs-schema", "mc_maincore"));
@@ -82,7 +99,8 @@ public class ServerBridgePlugin extends JavaPlugin {
             getLogger().info("MainCore not found - enabling standalone special-tool abilities + job sync.");
         }
 
-        getLogger().info("ServerBridge enabled. target-server=" + targetServer);
+        getLogger().info("ServerBridge enabled. server-name=" + (serverName.isEmpty() ? "(unset)" : serverName)
+                + ", target-server=" + targetServer + ", box=" + boxEnabled + ", standalone-jobs=" + jobsEnabled);
     }
 
     @Override
@@ -106,5 +124,21 @@ public class ServerBridgePlugin extends JavaPlugin {
 
     public String getTargetServer() {
         return targetServer;
+    }
+
+    /** This backend's own Velocity key, or "" when the server never set one. */
+    public String getServerName() {
+        return serverName;
+    }
+
+    /** Keeps a plugin.yml command from falling through to its usage text when the feature
+     * behind it is switched off for this server. */
+    private void disable(String... names) {
+        for (String name : names) {
+            getCommand(name).setExecutor((sender, command, label, args) -> {
+                sender.sendMessage("이 서버에서는 사용할 수 없는 명령어입니다.");
+                return true;
+            });
+        }
     }
 }

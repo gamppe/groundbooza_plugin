@@ -1,6 +1,7 @@
 # --- 서버 런타임 (jar, 월드, 로그, 설정 등) ---
 main-server/
 farm-server/
+magic-server/
 velocity/
 
 # --- Maven 빌드 산출물 ---

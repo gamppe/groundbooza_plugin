@@ -11,7 +11,13 @@ commands:
     description: Switch to the linked server
     usage: /파밍이동
   귓속말:
-    description: Whisper to a player on either server
+    description: Whisper to a player on any server
     usage: /귓속말 <플레이어> <메시지>
+  마법전쟁서버:
+    description: Switch to the 마법전쟁 event server
+    usage: /마법전쟁서버
+  땅부자서버:
+    description: Switch back to the main 땅 부자 타이쿤 server
+    usage: /땅부자서버
   groundbuza_compass_set_farm:
     description: Set the biome-finder compass's target biome (farm-server standalone copy)

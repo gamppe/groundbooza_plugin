@@ -15,6 +15,25 @@ jobs-schema: "mc_maincore"
 # Set to "farm" on main-server, and "main" on farm-server.
 target-server: "farm"
 
+# This server's own key in Velocity's [servers] block. Only used so a /<서버>이동 command
+# run on the server it points at can say "you are already here" instead of doing nothing.
+server-name: "main"
+
+# Velocity [servers] keys behind the named switch commands. A new backend needs an entry
+# here plus a command in plugin.yml - see ConnectCommand.
+servers:
+  main: "main"
+  magic: "magic"
+
+# Subsystems this server runs. The event-only 마법전쟁 server turns both off and is left with
+# nothing but /귓속말 and the server-switch commands.
+features:
+  # 파밍상자 / the shared MySQL-backed box, and the item rules that go with it.
+  box: true
+  # When MainCore is absent, run the standalone copies of the job tools and abilities
+  # (farmer/miner/fisher, crop rules, dye + wood recipes, no-enchant).
+  standalone-jobs: true
+
 box:
   size: 27
   title: "개인 상자"
