@@ -11,13 +11,20 @@ import org.bukkit.plugin.java.JavaPlugin;
 public class MagicWarPlugin extends JavaPlugin {
 
     private ArenaManager arenaManager;
+    private ClassManager classManager;
+    private ClassGuideItem classGuideItem;
+    private ClassController classController;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
         FileConfiguration config = getConfig();
 
-        this.arenaManager = new ArenaManager(this, new RoundSettings(config));
+        this.classManager = new ClassManager();
+        this.classGuideItem = new ClassGuideItem(this);
+        this.arenaManager = new ArenaManager(this, new RoundSettings(config), classManager, classGuideItem);
+        this.classController = new ClassController(this, classManager, classGuideItem);
+        arenaManager.setClassController(classController);
 
         // A crash or a /stop mid-round leaves the last arena on disk; nothing holds it open
         // at enable time, so this is the one moment deleting it is guaranteed to work.
@@ -27,6 +34,9 @@ public class MagicWarPlugin extends JavaPlugin {
         getCommand("마법전쟁").setExecutor(command);
         getCommand("마법전쟁").setTabCompleter(command);
         getServer().getPluginManager().registerEvents(new LobbyListener(arenaManager), this);
+        getCommand("클래스").setExecutor(new ClassCommand(classController));
+        getServer().getPluginManager().registerEvents(
+                new ClassListener(this, arenaManager, classManager, classGuideItem, classController), this);
 
         getLogger().info("MagicWar enabled. lobby=" + arenaManager.lobbyWorldName());
     }
@@ -40,5 +50,9 @@ public class MagicWarPlugin extends JavaPlugin {
 
     public ArenaManager getArenaManager() {
         return arenaManager;
+    }
+
+    public ClassManager getClassManager() {
+        return classManager;
     }
 }

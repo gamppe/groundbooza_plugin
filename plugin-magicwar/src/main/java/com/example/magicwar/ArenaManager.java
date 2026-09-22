@@ -45,6 +45,9 @@ public class ArenaManager {
 
     private final MagicWarPlugin plugin;
     private final RoundSettings settings;
+    private final ClassManager classes;
+    private final ClassGuideItem guide;
+    private ClassController classController;
     private final Random random = new Random();
     /** Every scheduled step of the current round, so 중지 can drop all of them at once. */
     private final List<BukkitTask> roundTasks = new ArrayList<>();
@@ -59,9 +62,17 @@ public class ArenaManager {
     private double pendingCenterZ;
     private double pendingSize;
 
-    public ArenaManager(MagicWarPlugin plugin, RoundSettings settings) {
+    public ArenaManager(MagicWarPlugin plugin, RoundSettings settings, ClassManager classes, ClassGuideItem guide) {
         this.plugin = plugin;
         this.settings = settings;
+        this.classes = classes;
+        this.guide = guide;
+    }
+
+    /** Set after construction: the controller needs the manager, and the manager opens the
+     * picker at the teleport, so one of the two links has to be late. */
+    public void setClassController(ClassController classController) {
+        this.classController = classController;
     }
 
     public String lobbyWorldName() {
@@ -188,9 +199,7 @@ public class ArenaManager {
             player.teleport(spawn);
             player.setGameMode(GameMode.SURVIVAL);
             player.setInvulnerable(true);
-            if (settings.giveMap) {
-                player.getInventory().addItem(arenaMap.clone());
-            }
+            giveKit(player);
             player.showTitle(Title.title(
                     Component.text("준비 시간", NamedTextColor.AQUA),
                     Component.text(minutes(settings.graceSeconds) + " 동안 무적입니다", NamedTextColor.GRAY),
@@ -342,6 +351,25 @@ public class ArenaManager {
         }.runTaskTimer(plugin, 1L, 1L));
     }
 
+    /** Starting gear, plus the class picker for anyone who has not chosen yet. The picker is
+     * opened a tick later so it lands after the teleport rather than being closed by it. */
+    private void giveKit(Player player) {
+        if (settings.giveMap && arenaMap != null) {
+            player.getInventory().addItem(arenaMap.clone());
+        }
+        player.getInventory().addItem(new ItemStack(Material.IRON_PICKAXE));
+        player.getInventory().addItem(new ItemStack(Material.BREAD, 10));
+        player.getInventory().addItem(guide.create(classes.classOf(player.getUniqueId())));
+
+        if (classController != null && !classes.hasClass(player.getUniqueId())) {
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (player.isOnline()) {
+                    classController.openSelect(player);
+                }
+            });
+        }
+    }
+
     /** The generated spawn can be underwater or in a tree; this drops everyone on the surface
      * at the middle of the arena instead - all on the same spot, by design. */
     private Location safeArenaSpawn() {
@@ -374,6 +402,7 @@ public class ArenaManager {
     /** Everyone back to the lobby, then the arena is unloaded and deleted. */
     private void endRound() {
         phase = Phase.IDLE;
+        classes.clear(); // a class lasts one match
         for (Player player : Bukkit.getOnlinePlayers()) {
             player.setInvulnerable(false);
             if (!isLobby(player.getWorld())) {
