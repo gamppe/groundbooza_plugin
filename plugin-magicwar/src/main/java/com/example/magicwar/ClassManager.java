@@ -80,6 +80,11 @@ public class ClassManager {
         return pick.advancement == null ? pick.magicClass.label() : pick.advancement.label();
     }
 
+    /** Drops one player's pick, so they get the opening screen again. */
+    public void reset(UUID uuid) {
+        picks.remove(uuid);
+    }
+
     public void clear() {
         picks.clear();
     }

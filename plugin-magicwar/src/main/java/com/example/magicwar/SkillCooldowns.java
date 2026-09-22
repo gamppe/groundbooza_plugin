@@ -91,6 +91,10 @@ public class SkillCooldowns {
         return charges.left;
     }
 
+    public void reset(UUID uuid) {
+        state.remove(uuid);
+    }
+
     public void clear() {
         state.clear();
     }

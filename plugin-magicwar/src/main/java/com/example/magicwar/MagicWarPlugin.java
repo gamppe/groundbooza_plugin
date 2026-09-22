@@ -42,7 +42,9 @@ public class MagicWarPlugin extends JavaPlugin {
         getCommand("마법전쟁").setExecutor(command);
         getCommand("마법전쟁").setTabCompleter(command);
         getServer().getPluginManager().registerEvents(new LobbyListener(arenaManager), this);
-        getCommand("클래스").setExecutor(new ClassCommand(classController));
+        ClassCommand classCommand = new ClassCommand(classController, classManager, questManager, skillCooldowns);
+        getCommand("클래스").setExecutor(classCommand);
+        getCommand("클래스").setTabCompleter(classCommand);
         getServer().getPluginManager().registerEvents(
                 new ClassListener(this, arenaManager, classManager, classGuideItem, skillItem, classController, skillEffects, skillCooldowns), this);
         getServer().getPluginManager().registerEvents(skillEffects, this);

@@ -101,6 +101,15 @@ public class QuestManager {
         return true;
     }
 
+    /** Marks a quest finished outright - the operator's shortcut past the grind. */
+    public void complete(UUID uuid, Quest quest) {
+        of(uuid).counts().put(quest.id(), quest.target());
+    }
+
+    public void reset(UUID uuid) {
+        progress.remove(uuid);
+    }
+
     public void clear() {
         progress.clear();
     }
