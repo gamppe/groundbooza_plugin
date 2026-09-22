@@ -56,7 +56,16 @@ public class ClassListener implements Listener {
             controller.open(player);
             return;
         }
-        String skillId = skillItems.skillIdOf(event.getItem());
+        // Scroll in the off hand, target in the main hand: that is the binding gesture, and it
+        // has to be checked before casting or the main-hand item would just fire its own skill.
+        ItemStack offHand = player.getInventory().getItemInOffHand();
+        ItemStack mainHand = event.getItem();
+        if (skillItems.isSkillItem(offHand) && mainHand != null && !skillItems.isSkillItem(mainHand)) {
+            event.setCancelled(true);
+            controller.bindSkill(player, offHand, mainHand);
+            return;
+        }
+        String skillId = skillItems.skillIdOf(mainHand);
         if (skillId != null) {
             event.setCancelled(true);
             cast(player, skillId);
@@ -165,11 +174,7 @@ public class ClassListener implements Listener {
         if (index < 0) {
             return;
         }
-        if (event.isShiftClick()) {
-            controller.bindSkill(player, index);
-        } else {
-            controller.giveSkillCopy(player, index);
-        }
+        controller.giveSkillCopy(player, index);
     }
 
     /** Closing the picker without choosing puts it straight back up - but only in the arena, so

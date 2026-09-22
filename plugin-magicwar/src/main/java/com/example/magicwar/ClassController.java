@@ -188,8 +188,9 @@ public class ClassController {
                     NamedTextColor.AQUA, List.of(
                             "쿨타임 " + skill.cooldownSeconds() + "초",
                             "",
-                            "클릭: 복사본 받기",
-                            "Shift+클릭: 손에 든 아이템에 부여")));
+                            "클릭하여 주문서(복사본) 받기",
+                            "왼손에 주문서, 오른손에 아이템을 들고",
+                            "우클릭하면 그 아이템에 스킬이 부여됩니다")));
         }
         inv.setItem(SkillListHolder.SLOT_BACK, icon(Material.ARROW, "뒤로가기", NamedTextColor.YELLOW, List.of()));
         holder.setInventory(inv);
@@ -207,29 +208,42 @@ public class ClassController {
         player.sendMessage(Component.text(skill.name() + " 복사본을 받았습니다.", NamedTextColor.AQUA));
     }
 
-    /** Stamps a skill onto the held item, so that item casts on right-click too. Refuses an
-     * empty hand and anything that is already a skill - re-stamping would stack lore lines. */
-    public void bindSkill(Player player, int index) {
-        List<ClassSkill> owned = classes.ownedSkills(player.getUniqueId());
-        if (index < 0 || index >= owned.size()) {
+    /** Off-hand scroll plus main-hand target: stamps the skill onto the target and spends the
+     * scroll. The target keeps everything it had - the skill is tags, a cooldown group and two
+     * lore lines on top. */
+    public void bindSkill(Player player, ItemStack scroll, ItemStack target) {
+        String skillId = skills.skillIdOf(scroll);
+        ClassSkill skill = skillId == null ? null : classes.skillById(player.getUniqueId(), skillId);
+        if (skill == null) {
             return;
         }
-        ItemStack held = player.getInventory().getItemInMainHand();
-        if (held.getType().isAir()) {
-            player.sendMessage(Component.text("스킬을 부여할 아이템을 손에 들고 Shift+클릭하세요.", NamedTextColor.RED));
-            return;
-        }
-        if (skills.isSkillItem(held)) {
-            player.sendMessage(Component.text("이미 스킬이 부여된 아이템입니다.", NamedTextColor.RED));
-            return;
-        }
-        ClassSkill skill = owned.get(index);
-        skills.bind(held, skill, index, classes.displayName(player.getUniqueId()));
+        int slot = classes.ownedSkills(player.getUniqueId()).indexOf(skill);
+        skills.bind(target, skill, Math.max(0, slot), classes.displayName(player.getUniqueId()));
+        scroll.setAmount(scroll.getAmount() - 1);
+
         player.playSound(player, Sound.BLOCK_ENCHANTMENT_TABLE_USE, 1f, 1.2f);
-        player.sendMessage(Component.text("손에 든 아이템에 " + skill.name() + " 을(를) 부여했습니다. 우클릭으로 사용하세요.",
+        player.sendMessage(Component.text(skill.name() + " 을(를) 아이템에 부여했습니다. 우클릭으로 사용하세요.",
                 NamedTextColor.AQUA));
-        openSkills(player);
+        if (hasOwnRightClick(target)) {
+            player.sendMessage(Component.text("주의: 이 아이템의 원래 우클릭 동작은 더 이상 작동하지 않습니다.",
+                    NamedTextColor.YELLOW));
+        }
     }
+
+    /** Casting cancels the interaction, so anything the item used to do on right-click - being
+     * placed, eaten, drawn, thrown - stops working once a skill is on it. Worth saying out loud
+     * at the moment of binding rather than letting the player discover it mid-fight. */
+    private static boolean hasOwnRightClick(ItemStack item) {
+        Material type = item.getType();
+        return type.isBlock() || type.isEdible() || SELF_USING.contains(type);
+    }
+
+    private static final java.util.Set<Material> SELF_USING = java.util.Set.of(
+            Material.BOW, Material.CROSSBOW, Material.TRIDENT, Material.SHIELD, Material.FISHING_ROD,
+            Material.ENDER_PEARL, Material.EGG, Material.SNOWBALL, Material.SPLASH_POTION,
+            Material.LINGERING_POTION, Material.POTION, Material.MILK_BUCKET, Material.WATER_BUCKET,
+            Material.LAVA_BUCKET, Material.BUCKET, Material.WRITTEN_BOOK, Material.MAP, Material.SPYGLASS,
+            Material.GOAT_HORN, Material.FIREWORK_ROCKET, Material.CHORUS_FRUIT, Material.WIND_CHARGE);
 
     /** Clicking either a quest icon or its wool tries to claim - the icon is the obvious target
      * even though the wool is what changes colour. */
