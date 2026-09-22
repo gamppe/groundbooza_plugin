@@ -41,7 +41,7 @@ public class MagicWarPlugin extends JavaPlugin {
         getCommand("클래스").setExecutor(new ClassCommand(classController));
         getServer().getPluginManager().registerEvents(
                 new ClassListener(this, arenaManager, classManager, classGuideItem, skillItem, classController), this);
-        getServer().getPluginManager().registerEvents(new QuestListener(arenaManager, questManager), this);
+        getServer().getPluginManager().registerEvents(new QuestListener(arenaManager, classManager, questManager), this);
         MagicWarScoreboard scoreboard = new MagicWarScoreboard(arenaManager, classManager, questManager);
         getServer().getScheduler().runTaskTimer(this, scoreboard::tick, 20L, 20L);
 

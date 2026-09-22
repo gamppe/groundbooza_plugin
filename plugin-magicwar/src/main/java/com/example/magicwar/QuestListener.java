@@ -14,10 +14,12 @@ import org.bukkit.event.entity.EntityDeathEvent;
 public class QuestListener implements Listener {
 
     private final ArenaManager arena;
+    private final ClassManager classes;
     private final QuestManager quests;
 
-    public QuestListener(ArenaManager arena, QuestManager quests) {
+    public QuestListener(ArenaManager arena, ClassManager classes, QuestManager quests) {
         this.arena = arena;
+        this.classes = classes;
         this.quests = quests;
     }
 
@@ -31,7 +33,7 @@ public class QuestListener implements Listener {
         if (killer == null || !counts(killer)) {
             return;
         }
-        quests.onKill(killer.getUniqueId(), event.getEntity().getType(),
+        quests.onKill(killer.getUniqueId(), classes.classOf(killer.getUniqueId()), event.getEntity().getType(),
                 (quest, finished) -> report(killer, quest, finished));
     }
 
@@ -41,7 +43,7 @@ public class QuestListener implements Listener {
         if (!counts(player)) {
             return;
         }
-        quests.onMine(player.getUniqueId(), event.getBlock().getType(),
+        quests.onMine(player.getUniqueId(), classes.classOf(player.getUniqueId()), event.getBlock().getType(),
                 (quest, finished) -> report(player, quest, finished));
     }
 
@@ -53,7 +55,6 @@ public class QuestListener implements Listener {
             return;
         }
         player.sendActionBar(Component.text(quest.display() + " ("
-                + quests.count(player.getUniqueId(), quest) + "/" + quest.target() + ")",
-                quest.category().color()));
+                + quests.count(player.getUniqueId(), quest) + "/" + quest.target() + ")", quest.color()));
     }
 }

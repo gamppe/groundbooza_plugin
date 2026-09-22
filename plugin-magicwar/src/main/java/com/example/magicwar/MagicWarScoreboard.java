@@ -63,10 +63,10 @@ public class MagicWarScoreboard {
                         magicClass == null ? NamedTextColor.DARK_GRAY : NamedTextColor.AQUA)));
         lines.add(Component.text("-------------------------", NamedTextColor.DARK_GRAY));
 
-        for (Quest quest : QuestManager.BOARD) {
+        for (Quest quest : QuestManager.boardFor(magicClass)) {
             int count = quests.count(player.getUniqueId(), quest);
             boolean done = count >= quest.target();
-            Component line = Component.text(quest.category().tag(), quest.category().color())
+            Component line = Component.text("[" + quest.tag() + "]", quest.color())
                     .append(Component.text(" " + quest.title() + " (" + count + "/" + quest.target() + ")",
                             done ? NamedTextColor.DARK_GRAY : NamedTextColor.WHITE));
             lines.add(done ? line.decoration(TextDecoration.STRIKETHROUGH, true) : line);

@@ -76,13 +76,18 @@ public class ClassController {
         List<MagicClass.Advancement> options = base.advancements();
         for (int i = 0; i < options.size(); i++) {
             MagicClass.Advancement option = options.get(i);
+            boolean ready = quests.isComplete(player.getUniqueId(), option.quest());
+            List<String> lore = new ArrayList<>();
+            lore.add(base.label() + " 의 2차 클래스");
+            lore.add("");
+            lore.add("두번째 스킬: " + option.skill().name());
+            lore.add("");
+            lore.add(option.quest().display() + " ("
+                    + quests.count(player.getUniqueId(), option.quest()) + "/" + option.quest().target() + ")");
+            lore.add(ready ? "클릭하여 전직" : "퀘스트를 완료해야 전직할 수 있습니다");
             inv.setItem(ClassSelectHolder.slotFor(i, options.size()),
-                    icon(option.icon(), option.label(), NamedTextColor.LIGHT_PURPLE, List.of(
-                            base.label() + " 의 2차 클래스",
-                            "",
-                            "두번째 스킬: " + option.skill().name(),
-                            "",
-                            "클릭하여 전직")));
+                    icon(ready ? option.icon() : Material.BARRIER, option.label(),
+                            ready ? option.color() : NamedTextColor.DARK_GRAY, lore));
         }
         holder.setInventory(inv);
         player.openInventory(inv);
@@ -107,7 +112,7 @@ public class ClassController {
     public void advance(Player player, int index) {
         UUID uuid = player.getUniqueId();
         MagicClass base = classes.classOf(uuid);
-        if (base == null || classes.hasAdvanced(uuid) || !advancementUnlocked(uuid)) {
+        if (base == null || classes.hasAdvanced(uuid)) {
             return;
         }
         List<MagicClass.Advancement> options = base.advancements();
@@ -115,6 +120,12 @@ public class ClassController {
             return;
         }
         MagicClass.Advancement picked = options.get(index);
+        // Each 전직 has its own quest; finishing one does not open the others.
+        if (!quests.isComplete(uuid, picked.quest())) {
+            player.sendMessage(Component.text(picked.quest().display() + " 을(를) 먼저 완료해야 합니다.",
+                    NamedTextColor.RED));
+            return;
+        }
         classes.advance(uuid, picked);
         guide.refresh(player, classes.displayName(uuid));
         player.getInventory().addItem(skills.createAdvanced(base, picked));
@@ -124,10 +135,12 @@ public class ClassController {
         Bukkit.getScheduler().runTask(plugin, () -> openBoard(player));
     }
 
-    /** 전직 is gated on the 2차전직 quest being finished. */
+    /** The anvil opens as soon as any one 전직 quest is done; which options are actually
+     * takeable is decided inside the screen, per advancement. */
     public boolean advancementUnlocked(UUID uuid) {
-        Quest gate = QuestManager.advancementQuest();
-        return gate != null && quests.isComplete(uuid, gate);
+        MagicClass base = classes.classOf(uuid);
+        return base != null && base.advancements().stream()
+                .anyMatch(advancement -> quests.isComplete(uuid, advancement.quest()));
     }
 
     // ---------- the quest board ----------
@@ -147,8 +160,9 @@ public class ClassController {
                 classes.hasAdvanced(uuid) ? classes.advancementOf(uuid).icon() : magicClass.icon(),
                 classes.displayName(uuid), NamedTextColor.GOLD, List.of(magicClass.blurb())));
 
-        for (int i = 0; i < QuestManager.BOARD.size(); i++) {
-            Quest quest = QuestManager.BOARD.get(i);
+        List<Quest> board = QuestManager.boardFor(magicClass);
+        for (int i = 0; i < board.size(); i++) {
+            Quest quest = board.get(i);
             inv.setItem(ClassUpgradeHolder.questSlot(i), questIcon(uuid, quest));
             inv.setItem(ClassUpgradeHolder.woolSlot(i), questWool(uuid, quest));
         }
@@ -162,7 +176,11 @@ public class ClassController {
      * even though the wool is what changes colour. */
     public void claim(Player player, int index) {
         UUID uuid = player.getUniqueId();
-        Quest quest = QuestManager.BOARD.get(index);
+        List<Quest> board = QuestManager.boardFor(classes.classOf(uuid));
+        if (index < 0 || index >= board.size()) {
+            return;
+        }
+        Quest quest = board.get(index);
         if (!quests.isComplete(uuid, quest)) {
             player.sendMessage(Component.text("아직 완료하지 않은 퀘스트입니다. ("
                     + quests.count(uuid, quest) + "/" + quest.target() + ")", NamedTextColor.RED));
@@ -187,7 +205,7 @@ public class ClassController {
         lore.add("보상: " + quest.reward());
         lore.add("");
         lore.add(done ? (quests.isClaimed(uuid, quest) ? "보상을 받았습니다" : "클릭하여 보상 획득") : "진행 중");
-        ItemStack item = icon(quest.icon(), quest.display(), quest.category().color(), lore);
+        ItemStack item = icon(quest.icon(), quest.display(), quest.color(), lore);
         if (done) {
             ItemMeta meta = item.getItemMeta();
             meta.setEnchantmentGlintOverride(true);
@@ -212,16 +230,19 @@ public class ClassController {
             return icon(Material.ANVIL, "전직 완료", NamedTextColor.DARK_GRAY,
                     List.of("이미 " + classes.displayName(uuid) + " (으)로 전직했습니다"));
         }
-        Quest gate = QuestManager.advancementQuest();
-        if (!advancementUnlocked(uuid)) {
-            return icon(Material.ANVIL, "전직 (잠김)", NamedTextColor.DARK_GRAY, List.of(
-                    gate == null ? "전직 퀘스트가 없습니다"
-                            : gate.display() + " 을(를) 완료해야 합니다",
-                    gate == null ? "" : "진행도: " + quests.count(uuid, gate) + " / " + gate.target()));
+        List<String> lore = new ArrayList<>();
+        lore.add(magicClass.label() + " 의 2차 클래스를 고릅니다");
+        lore.add("");
+        for (MagicClass.Advancement advancement : magicClass.advancements()) {
+            lore.add((quests.isComplete(uuid, advancement.quest()) ? "✔ " : "✖ ") + advancement.label()
+                    + " — " + advancement.quest().title() + " ("
+                    + quests.count(uuid, advancement.quest()) + "/" + advancement.quest().target() + ")");
         }
-        return icon(Material.ANVIL, "전직", NamedTextColor.LIGHT_PURPLE, List.of(
-                magicClass.label() + " 의 2차 클래스를 고릅니다",
-                "클릭하여 전직"));
+        lore.add("");
+        boolean any = advancementUnlocked(uuid);
+        lore.add(any ? "클릭하여 전직" : "전직 퀘스트를 하나라도 완료해야 합니다");
+        return icon(Material.ANVIL, any ? "전직" : "전직 (잠김)",
+                any ? NamedTextColor.LIGHT_PURPLE : NamedTextColor.DARK_GRAY, lore);
     }
 
     private static ItemStack icon(Material material, String name, NamedTextColor color, List<String> lore) {
