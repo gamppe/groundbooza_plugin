@@ -87,6 +87,7 @@ public class SkillEffects implements Listener {
 
     private final MagicWarPlugin plugin;
     private final ClassManager classes;
+    private final SkillCooldowns cooldowns;
     private final NamespacedKey waveShotKey;
     private final NamespacedKey boltKey;
     private final Random random = new Random();
@@ -95,9 +96,10 @@ public class SkillEffects implements Listener {
     /** Players mid-뇌격, exempt from fall damage until shortly after they touch down. */
     private final Set<UUID> noFall = new HashSet<>();
 
-    public SkillEffects(MagicWarPlugin plugin, ClassManager classes) {
+    public SkillEffects(MagicWarPlugin plugin, ClassManager classes, SkillCooldowns cooldowns) {
         this.plugin = plugin;
         this.classes = classes;
+        this.cooldowns = cooldowns;
         this.waveShotKey = new NamespacedKey(plugin, "wave_shot");
         this.boltKey = new NamespacedKey(plugin, "bolt");
     }
@@ -122,6 +124,20 @@ public class SkillEffects implements Listener {
             case "thunder_strike" -> thunderStrike(player);
             default -> placeholder(player, skill);
         };
+    }
+
+    /** Hide or restore the sweep on whichever item carries this skill. Silent when the player
+     * somehow no longer owns it. */
+    private void showFollowUp(Player player, String skillId, boolean pending) {
+        ClassSkill skill = classes.skillById(player.getUniqueId(), skillId);
+        if (skill == null) {
+            return;
+        }
+        if (pending) {
+            cooldowns.suspend(player, skill);
+        } else {
+            cooldowns.resume(player, skill);
+        }
     }
 
     private boolean isMonk(Player player) {
@@ -193,6 +209,7 @@ public class SkillEffects implements Listener {
     private void markBlink(Player player, LivingEntity target) {
         blinks.put(player.getUniqueId(), new Blink(target.getUniqueId(), target.getLocation().clone(),
                 System.currentTimeMillis() + BLINK_WINDOW_MILLIS));
+        showFollowUp(player, "wave_shot", true);
         player.playSound(player, Sound.BLOCK_BEACON_ACTIVATE, 0.7f, 1.8f);
         player.sendActionBar(Component.text("3초 내로 다시 시전하면 그 자리로 이동합니다", NamedTextColor.GOLD));
     }
@@ -204,6 +221,7 @@ public class SkillEffects implements Listener {
         }
         if (System.currentTimeMillis() > blink.expiresAtMillis()) {
             blinks.remove(player.getUniqueId());
+            showFollowUp(player, "wave_shot", false);
             return false;
         }
         return true;
@@ -220,6 +238,7 @@ public class SkillEffects implements Listener {
 
     private boolean blinkStrike(Player player) {
         Blink blink = blinks.remove(player.getUniqueId());
+        showFollowUp(player, "wave_shot", false);
         if (blink == null) {
             return false;
         }
@@ -254,6 +273,7 @@ public class SkillEffects implements Listener {
         player.setVelocity(player.getVelocity().setY(THUNDER_LEAP));
         leaps.put(player.getUniqueId(), new Leap(false, false, System.currentTimeMillis()));
         noFall.add(player.getUniqueId());
+        showFollowUp(player, "thunder_strike", true);
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_BREEZE_JUMP, 1f, 0.9f);
         player.sendActionBar(Component.text("공중에서 다시 시전하면 돌진합니다", NamedTextColor.GOLD));
         return true;
@@ -285,6 +305,7 @@ public class SkillEffects implements Listener {
         Leap current = leaps.get(player.getUniqueId());
         leaps.put(player.getUniqueId(), new Leap(true, current != null && current.leftGround(),
                 System.currentTimeMillis()));
+        showFollowUp(player, "thunder_strike", false);
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_WIND_CHARGE_THROW, 1f, 0.8f);
         player.sendActionBar(Component.text("뇌격!", NamedTextColor.GOLD));
         return true;
@@ -292,6 +313,7 @@ public class SkillEffects implements Listener {
 
     /** Called every tick from the plugin: watches for a dashing player touching down. */
     public void tick() {
+        expireBlinks();
         Iterator<Map.Entry<UUID, Leap>> it = leaps.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<UUID, Leap> entry = it.next();
@@ -300,6 +322,9 @@ public class SkillEffects implements Listener {
             if (player == null || !player.isOnline()
                     || System.currentTimeMillis() - leap.startedAtMillis() > THUNDER_TIMEOUT_MILLIS) {
                 it.remove();
+                if (player != null) {
+                    showFollowUp(player, "thunder_strike", false);
+                }
                 continue;
             }
             if (!player.isOnGround()) {
@@ -315,11 +340,30 @@ public class SkillEffects implements Listener {
                 continue; // still on the launch tick - the jump has not started yet
             }
             it.remove();
+            showFollowUp(player, "thunder_strike", false);
             if (leap.dashed()) {
                 thunderLanding(player);
             }
             // A moment's grace so the slam itself does not hurt the caster.
             Bukkit.getScheduler().runTaskLater(plugin, () -> noFall.remove(player.getUniqueId()), 10L);
+        }
+    }
+
+    /** The three-second window closes on its own, so the sweep has to come back on its own too
+     * rather than waiting for the next cast to notice. */
+    private void expireBlinks() {
+        long now = System.currentTimeMillis();
+        Iterator<Map.Entry<UUID, Blink>> it = blinks.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<UUID, Blink> entry = it.next();
+            if (now <= entry.getValue().expiresAtMillis()) {
+                continue;
+            }
+            it.remove();
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player != null) {
+                showFollowUp(player, "wave_shot", false);
+            }
         }
     }
 

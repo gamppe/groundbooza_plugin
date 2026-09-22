@@ -28,8 +28,8 @@ public class MagicWarPlugin extends JavaPlugin {
         this.questManager = new QuestManager();
         this.classGuideItem = new ClassGuideItem(this);
         this.skillItem = new SkillItem(this);
-        SkillEffects skillEffects = new SkillEffects(this, classManager);
         this.skillCooldowns = new SkillCooldowns();
+        SkillEffects skillEffects = new SkillEffects(this, classManager, skillCooldowns);
         this.arenaManager = new ArenaManager(this, new RoundSettings(config), classManager, questManager, classGuideItem);
         this.classController = new ClassController(this, classManager, questManager, classGuideItem, skillItem);
         arenaManager.setClassController(classController);
