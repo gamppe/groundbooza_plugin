@@ -86,13 +86,18 @@ public class ClassListener implements Listener {
             player.sendActionBar(Component.text("아레나에서만 사용할 수 있습니다.", NamedTextColor.RED));
             return;
         }
-        // Cooldowns live on the skill, not the item, so every copy of one shares them.
-        if (!cooldowns.ready(player, skill)) {
+        // The second half of a two-step skill rides on the first cast's cooldown, so it is let
+        // through untouched - otherwise the follow-up window would always be shut.
+        boolean followUp = effects.isFollowUp(player, skill);
+        if (!followUp && !cooldowns.ready(player, skill)) {
             player.sendActionBar(Component.text("쿨타임 " + cooldowns.secondsLeft(player, skill) + "초",
                     NamedTextColor.RED));
             return;
         }
         if (!effects.cast(player, skill)) {
+            return;
+        }
+        if (followUp) {
             return;
         }
         int left = cooldowns.consume(player, skill);

@@ -20,12 +20,12 @@ public enum MagicClass {
     BATTLE_MAGE("배틀메이지", Material.STONE_SWORD, "마법을 두른 근접 전사",
             List.of(new ClassSkill("wave_shot", "파동탄", Material.SKULL_BANNER_PATTERN, 10)),
             List.of(
-                    new Advancement("룬나이트", Material.IRON_SWORD, NamedTextColor.GOLD,
-                            new ClassSkill("runeknight_2", "두번째 스킬", Material.CREEPER_BANNER_PATTERN, 20),
-                            Quest.kill("adv_runeknight", "룬나이트", NamedTextColor.GOLD,
-                                    "좀비 5마리 잡기", 5, Material.ROTTEN_FLESH, "룬나이트 전직 해금",
+                    new Advancement("monk", "수도사", Material.IRON_SWORD, NamedTextColor.GOLD,
+                            new ClassSkill("thunder_strike", "뇌격", Material.CREEPER_BANNER_PATTERN, 20),
+                            Quest.kill("adv_monk", "수도사", NamedTextColor.GOLD,
+                                    "좀비 5마리 잡기", 5, Material.ROTTEN_FLESH, "수도사 전직 해금",
                                     EntityType.ZOMBIE)),
-                    new Advancement("스펠블레이드", Material.DIAMOND_SWORD, NamedTextColor.RED,
+                    new Advancement("spellblade", "스펠블레이드", Material.DIAMOND_SWORD, NamedTextColor.RED,
                             new ClassSkill("spellblade_2", "두번째 스킬", Material.PIGLIN_BANNER_PATTERN, 20),
                             Quest.kill("adv_spellblade", "스펠블레이드", NamedTextColor.RED,
                                     "거미 5마리 잡기", 5, Material.STRING, "스펠블레이드 전직 해금",
@@ -34,12 +34,12 @@ public enum MagicClass {
     SORCERER("소서러", Material.FIRE_CHARGE, "원거리 주문으로 싸우는 마법사",
             List.of(new ClassSkill("bolt", "볼트마법", Material.FLOW_BANNER_PATTERN, 6, 3)),
             List.of(
-                    new Advancement("엘리멘탈리스트", Material.BLAZE_POWDER, NamedTextColor.AQUA,
+                    new Advancement("elementalist", "엘리멘탈리스트", Material.BLAZE_POWDER, NamedTextColor.AQUA,
                             new ClassSkill("elementalist_2", "두번째 스킬", Material.GLOBE_BANNER_PATTERN, 20),
                             Quest.mine("adv_elementalist", "엘리멘탈리스트", NamedTextColor.AQUA,
                                     "석탄 10개 캐기", 10, Material.COAL, "엘리멘탈리스트 전직 해금",
                                     java.util.Set.of(Material.COAL_ORE, Material.DEEPSLATE_COAL_ORE))),
-                    new Advancement("네크로맨서", Material.WITHER_SKELETON_SKULL, NamedTextColor.DARK_PURPLE,
+                    new Advancement("necromancer", "네크로맨서", Material.WITHER_SKELETON_SKULL, NamedTextColor.DARK_PURPLE,
                             new ClassSkill("necromancer_2", "두번째 스킬", Material.FLOWER_BANNER_PATTERN, 20),
                             Quest.kill("adv_necromancer", "네크로맨서", NamedTextColor.DARK_PURPLE,
                                     "스켈레톤 5마리 잡기", 5, Material.BONE, "네크로맨서 전직 해금",
@@ -48,19 +48,19 @@ public enum MagicClass {
     SUMMONER("서머너", Material.PIG_SPAWN_EGG, "소환수를 부려 싸우는 술사",
             List.of(new ClassSkill("pig_burst", "돼지 소환", Material.GUSTER_BANNER_PATTERN, 60)),
             List.of(
-                    new Advancement("비스트마스터", Material.WOLF_SPAWN_EGG, NamedTextColor.GREEN,
+                    new Advancement("beastmaster", "비스트마스터", Material.WOLF_SPAWN_EGG, NamedTextColor.GREEN,
                             new ClassSkill("beastmaster_2", "두번째 스킬", Material.BORDURE_INDENTED_BANNER_PATTERN, 20),
                             Quest.kill("adv_beastmaster", "비스트마스터", NamedTextColor.GREEN,
                                     "소 5마리 잡기", 5, Material.LEATHER, "비스트마스터 전직 해금",
                                     EntityType.COW)),
-                    new Advancement("정령술사", Material.ALLAY_SPAWN_EGG, NamedTextColor.LIGHT_PURPLE,
+                    new Advancement("spiritcaller", "정령술사", Material.ALLAY_SPAWN_EGG, NamedTextColor.LIGHT_PURPLE,
                             new ClassSkill("spiritcaller_2", "두번째 스킬", Material.FIELD_MASONED_BANNER_PATTERN, 20),
                             Quest.kill("adv_spiritcaller", "정령술사", NamedTextColor.LIGHT_PURPLE,
                                     "양 5마리 잡기", 5, Material.WHITE_WOOL, "정령술사 전직 해금",
                                     EntityType.SHEEP))));
 
     /** A tier-2 class: its own colour, its own extra skill, and the quest that unlocks it. */
-    public record Advancement(String label, Material icon, NamedTextColor color,
+    public record Advancement(String id, String label, Material icon, NamedTextColor color,
                               ClassSkill skill, Quest quest) {}
 
     private final String label;

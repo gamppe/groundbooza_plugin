@@ -446,6 +446,7 @@ public class ArenaManager {
         classes.clear(); // a class lasts one match
         quests.clear();
         plugin.getSkillCooldowns().clear();
+        plugin.getSkillEffects().clear();
         for (Player player : Bukkit.getOnlinePlayers()) {
             player.setInvulnerable(false);
             if (!isLobby(player.getWorld())) {

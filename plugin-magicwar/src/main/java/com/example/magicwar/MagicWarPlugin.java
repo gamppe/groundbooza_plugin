@@ -16,6 +16,7 @@ public class MagicWarPlugin extends JavaPlugin {
     private ClassGuideItem classGuideItem;
     private SkillItem skillItem;
     private SkillCooldowns skillCooldowns;
+    private SkillEffects skillEffects;
     private ClassController classController;
 
     @Override
@@ -27,7 +28,7 @@ public class MagicWarPlugin extends JavaPlugin {
         this.questManager = new QuestManager();
         this.classGuideItem = new ClassGuideItem(this);
         this.skillItem = new SkillItem(this);
-        SkillEffects skillEffects = new SkillEffects(this);
+        SkillEffects skillEffects = new SkillEffects(this, classManager);
         this.skillCooldowns = new SkillCooldowns();
         this.arenaManager = new ArenaManager(this, new RoundSettings(config), classManager, questManager, classGuideItem);
         this.classController = new ClassController(this, classManager, questManager, classGuideItem, skillItem);
@@ -48,6 +49,8 @@ public class MagicWarPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(
                 new ClassListener(this, arenaManager, classManager, classGuideItem, skillItem, classController, skillEffects, skillCooldowns), this);
         getServer().getPluginManager().registerEvents(skillEffects, this);
+        getServer().getScheduler().runTaskTimer(this, skillEffects::tick, 1L, 1L);
+        this.skillEffects = skillEffects;
         getServer().getPluginManager().registerEvents(new QuestListener(arenaManager, classManager, questManager), this);
         MagicWarScoreboard scoreboard = new MagicWarScoreboard(arenaManager, classManager, questManager);
         getServer().getScheduler().runTaskTimer(this, scoreboard::tick, 20L, 20L);
@@ -72,5 +75,9 @@ public class MagicWarPlugin extends JavaPlugin {
 
     public SkillCooldowns getSkillCooldowns() {
         return skillCooldowns;
+    }
+
+    public SkillEffects getSkillEffects() {
+        return skillEffects;
     }
 }

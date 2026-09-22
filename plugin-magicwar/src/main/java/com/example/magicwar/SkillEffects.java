@@ -2,6 +2,7 @@ package com.example.magicwar;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
@@ -21,21 +22,35 @@ import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 
 /**
  * What the skills actually do. Dispatch is on {@link ClassSkill#id()}, so adding a skill is an
  * entry in {@link MagicClass} plus a case here; anything without a case falls back to the
  * placeholder flourish.
+ *
+ * <p>Two skills are two-step: 파동탄 for a 수도사 leaves a mark to blink to, and 뇌격 leaps
+ * before it dashes. Both second steps are casts of the same item, so they answer
+ * {@link #isFollowUp} and the caller lets them through without touching the cooldown.
  */
 public class SkillEffects implements Listener {
 
     // ---------- 파동탄 ----------
     private static final double WAVE_SHOT_DAMAGE = 3.0;
+    /** 수도사 trades the punch for the blink that follows. */
+    private static final double WAVE_SHOT_MONK_DAMAGE = 1.0;
     private static final double WAVE_SHOT_SPEED = 1.6;
     /** Deliberately gentle - the wind burst vanilla would apply is far stronger. */
     private static final double WAVE_SHOT_KNOCKBACK = 0.45;
     private static final int WAVE_SHOT_REWARD_TICKS = 10 * 20;
+    private static final int WAVE_SHOT_MONK_LIFETIME_TICKS = 2 * 20;
+    private static final long BLINK_WINDOW_MILLIS = 3000;
+    private static final double BLINK_DAMAGE = 5.0;
+    private static final double BLINK_RADIUS = 3.0;
 
     // ---------- 볼트마법 ----------
     private static final double BOLT_DAMAGE = 5.0;
@@ -46,13 +61,44 @@ public class SkillEffects implements Listener {
     private static final double PIG_SCATTER_SPEED = 0.7;
     private static final double PIG_SCATTER_LIFT = 0.45;
 
+    // ---------- 뇌격 ----------
+    private static final double THUNDER_LEAP = 1.25;
+    private static final double THUNDER_DASH_SPEED = 1.8;
+    /** How far up the dash may be aimed. Look higher than this and it is pulled back down to
+     * here, which is what turns an over-eager aim into a dive at the floor. */
+    private static final double THUNDER_MAX_UPWARD = 0.25;
+    private static final double THUNDER_LAND_RADIUS = 5.0;
+    private static final int THUNDER_SLOW_TICKS = 3 * 20;
+    /** Give up waiting for a landing after this, so nobody is left mid-skill forever. */
+    private static final long THUNDER_TIMEOUT_MILLIS = 15000;
+
+    private record Blink(Location target, long expiresAtMillis) {}
+
+    private record Leap(boolean dashed, long startedAtMillis) {}
+
+    private final MagicWarPlugin plugin;
+    private final ClassManager classes;
     private final NamespacedKey waveShotKey;
     private final NamespacedKey boltKey;
     private final Random random = new Random();
+    private final Map<UUID, Blink> blinks = new HashMap<>();
+    private final Map<UUID, Leap> leaps = new HashMap<>();
 
-    public SkillEffects(MagicWarPlugin plugin) {
+    public SkillEffects(MagicWarPlugin plugin, ClassManager classes) {
+        this.plugin = plugin;
+        this.classes = classes;
         this.waveShotKey = new NamespacedKey(plugin, "wave_shot");
         this.boltKey = new NamespacedKey(plugin, "bolt");
+    }
+
+    /** True when this cast is the second half of a two-step skill, which the caller uses to
+     * skip both the cooldown check and spending a charge. */
+    public boolean isFollowUp(Player player, ClassSkill skill) {
+        return switch (skill.id()) {
+            case "wave_shot" -> blinkReady(player);
+            case "thunder_strike" -> leapReady(player);
+            default -> false;
+        };
     }
 
     /** @return false when the skill could not be cast after all, so the caller can skip the
@@ -62,16 +108,33 @@ public class SkillEffects implements Listener {
             case "wave_shot" -> waveShot(player);
             case "bolt" -> bolt(player);
             case "pig_burst" -> pigBurst(player);
+            case "thunder_strike" -> thunderStrike(player);
             default -> placeholder(player, skill);
         };
     }
 
-    // ---------- 배틀메이지 1 : 파동탄 ----------
+    private boolean isMonk(Player player) {
+        MagicClass.Advancement advancement = classes.advancementOf(player.getUniqueId());
+        return advancement != null && advancement.id().equals("monk");
+    }
+
+    // ---------- 배틀메이지 1 : 파동탄 (수도사면 2단 스킬) ----------
 
     private boolean waveShot(Player player) {
+        if (blinkReady(player)) {
+            return blinkStrike(player);
+        }
         Vector direction = player.getEyeLocation().getDirection().normalize().multiply(WAVE_SHOT_SPEED);
-        player.launchProjectile(BreezeWindCharge.class, direction, charge ->
-                charge.getPersistentDataContainer().set(waveShotKey, PersistentDataType.BOOLEAN, true));
+        BreezeWindCharge charge = player.launchProjectile(BreezeWindCharge.class, direction, shot ->
+                shot.getPersistentDataContainer().set(waveShotKey, PersistentDataType.BOOLEAN, true));
+        if (isMonk(player)) {
+            // A 수도사 shot is a marker, not a missile: short-lived, and the blink is the payoff.
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (charge.isValid()) {
+                    charge.remove();
+                }
+            }, WAVE_SHOT_MONK_LIFETIME_TICKS);
+        }
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_BREEZE_SHOOT, 1f, 1.1f);
         player.sendActionBar(Component.text("파동탄!", NamedTextColor.AQUA));
         return true;
@@ -86,30 +149,157 @@ public class SkillEffects implements Listener {
                 .get(waveShotKey, PersistentDataType.BOOLEAN))) {
             return;
         }
-        Entity hit = event.getHitEntity();
         if (!(projectile.getShooter() instanceof Player shooter)) {
             return;
         }
-        if (!(hit instanceof LivingEntity target) || target.equals(shooter)) {
-            return; // a miss: let the projectile pop against the block as usual
+        boolean monk = isMonk(shooter);
+        Entity hit = event.getHitEntity();
+
+        if (hit instanceof LivingEntity target && !target.equals(shooter)) {
+            event.setCancelled(true);
+            projectile.remove();
+            target.damage(monk ? WAVE_SHOT_MONK_DAMAGE : WAVE_SHOT_DAMAGE, shooter);
+            Vector push = target.getLocation().toVector().subtract(shooter.getLocation().toVector());
+            if (push.lengthSquared() < 1.0E-4) {
+                push = shooter.getEyeLocation().getDirection();
+            }
+            push = push.normalize().multiply(WAVE_SHOT_KNOCKBACK).setY(0.25);
+            target.setVelocity(target.getVelocity().add(push));
+            target.getWorld().spawnParticle(Particle.GUST, target.getLocation().add(0, 1, 0), 1);
+            target.getWorld().playSound(target.getLocation(), Sound.ENTITY_WIND_CHARGE_WIND_BURST, 1f, 1.3f);
+
+            if (monk) {
+                markBlink(shooter, target.getLocation());
+            } else {
+                // Landing the hit is what pays out, so a miss gives nothing.
+                shooter.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, WAVE_SHOT_REWARD_TICKS, 0));
+                shooter.sendActionBar(Component.text("명중! 신속 10초", NamedTextColor.AQUA));
+            }
+            return;
         }
-        event.setCancelled(true);
-        projectile.remove();
-
-        target.damage(WAVE_SHOT_DAMAGE, shooter);
-        Vector push = target.getLocation().toVector().subtract(shooter.getLocation().toVector());
-        if (push.lengthSquared() < 1.0E-4) {
-            push = shooter.getEyeLocation().getDirection();
+        // A 수도사 marks blocks too - that is how the blink doubles as movement.
+        if (monk && event.getHitBlock() != null) {
+            markBlink(shooter, event.getHitBlock().getLocation().add(0.5, 1, 0.5));
         }
-        push = push.normalize().multiply(WAVE_SHOT_KNOCKBACK).setY(0.25);
-        target.setVelocity(target.getVelocity().add(push));
+    }
 
-        target.getWorld().spawnParticle(Particle.GUST, target.getLocation().add(0, 1, 0), 1);
-        target.getWorld().playSound(target.getLocation(), Sound.ENTITY_WIND_CHARGE_WIND_BURST, 1f, 1.3f);
+    private void markBlink(Player player, Location target) {
+        blinks.put(player.getUniqueId(), new Blink(target.clone(), System.currentTimeMillis() + BLINK_WINDOW_MILLIS));
+        player.playSound(player, Sound.BLOCK_BEACON_ACTIVATE, 0.7f, 1.8f);
+        player.sendActionBar(Component.text("3초 내로 다시 시전하면 그 자리로 이동합니다", NamedTextColor.GOLD));
+    }
 
-        // Landing the hit is what pays out, so a miss gives nothing.
-        shooter.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, WAVE_SHOT_REWARD_TICKS, 0));
-        shooter.sendActionBar(Component.text("명중! 신속 10초", NamedTextColor.AQUA));
+    private boolean blinkReady(Player player) {
+        Blink blink = blinks.get(player.getUniqueId());
+        if (blink == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() > blink.expiresAtMillis()) {
+            blinks.remove(player.getUniqueId());
+            return false;
+        }
+        return true;
+    }
+
+    private boolean blinkStrike(Player player) {
+        Blink blink = blinks.remove(player.getUniqueId());
+        if (blink == null) {
+            return false;
+        }
+        Location target = blink.target();
+        if (!target.getWorld().equals(player.getWorld())) {
+            return false;
+        }
+        Location from = player.getLocation();
+        from.getWorld().spawnParticle(Particle.PORTAL, from.add(0, 1, 0), 30, 0.3, 0.6, 0.3);
+
+        target.setYaw(player.getLocation().getYaw());
+        target.setPitch(player.getLocation().getPitch());
+        player.teleport(target);
+
+        for (Entity nearby : player.getNearbyEntities(BLINK_RADIUS, BLINK_RADIUS, BLINK_RADIUS)) {
+            if (nearby instanceof LivingEntity victim && !victim.equals(player)) {
+                victim.damage(BLINK_DAMAGE, player);
+            }
+        }
+        target.getWorld().spawnParticle(Particle.SWEEP_ATTACK, target.clone().add(0, 1, 0), 8, 1.0, 0.5, 1.0);
+        target.getWorld().playSound(target, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 1.2f, 0.9f);
+        player.sendActionBar(Component.text("추격!", NamedTextColor.GOLD));
+        return true;
+    }
+
+    // ---------- 수도사 2 : 뇌격 ----------
+
+    private boolean thunderStrike(Player player) {
+        if (leapReady(player)) {
+            return thunderDash(player);
+        }
+        player.setVelocity(player.getVelocity().setY(THUNDER_LEAP));
+        leaps.put(player.getUniqueId(), new Leap(false, System.currentTimeMillis()));
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_BREEZE_JUMP, 1f, 0.9f);
+        player.sendActionBar(Component.text("공중에서 다시 시전하면 돌진합니다", NamedTextColor.GOLD));
+        return true;
+    }
+
+    /** The dash is only offered while the leap is still in the air and has not been spent. */
+    private boolean leapReady(Player player) {
+        Leap leap = leaps.get(player.getUniqueId());
+        return leap != null && !leap.dashed() && !player.isOnGround();
+    }
+
+    private boolean thunderDash(Player player) {
+        Vector direction = player.getEyeLocation().getDirection().normalize();
+        if (direction.getY() > THUNDER_MAX_UPWARD) {
+            // Clamped, then re-normalised, so aiming at the sky becomes a dive instead of a hop.
+            direction.setY(THUNDER_MAX_UPWARD);
+            direction.normalize();
+        }
+        player.setVelocity(direction.multiply(THUNDER_DASH_SPEED));
+        leaps.put(player.getUniqueId(), new Leap(true, System.currentTimeMillis()));
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_WIND_CHARGE_THROW, 1f, 0.8f);
+        player.sendActionBar(Component.text("뇌격!", NamedTextColor.GOLD));
+        return true;
+    }
+
+    /** Called every tick from the plugin: watches for a dashing player touching down. */
+    public void tick() {
+        Iterator<Map.Entry<UUID, Leap>> it = leaps.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<UUID, Leap> entry = it.next();
+            Player player = Bukkit.getPlayer(entry.getKey());
+            Leap leap = entry.getValue();
+            if (player == null || !player.isOnline()
+                    || System.currentTimeMillis() - leap.startedAtMillis() > THUNDER_TIMEOUT_MILLIS) {
+                it.remove();
+                continue;
+            }
+            if (!player.isOnGround()) {
+                if (leap.dashed()) {
+                    player.getWorld().spawnParticle(Particle.ELECTRIC_SPARK, player.getLocation(), 3, 0.2, 0.2, 0.2);
+                }
+                continue;
+            }
+            it.remove();
+            if (leap.dashed()) {
+                thunderLanding(player);
+            }
+        }
+    }
+
+    /** Lightning is struck for effect only - the real payload is the slow, and a real bolt would
+     * set the arena on fire. */
+    private void thunderLanding(Player player) {
+        Location at = player.getLocation();
+        at.getWorld().strikeLightningEffect(at);
+        at.getWorld().spawnParticle(Particle.ELECTRIC_SPARK, at.clone().add(0, 1, 0), 60, 1.5, 0.5, 1.5, 0.2);
+        at.getWorld().playSound(at, Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 1f, 1.2f);
+
+        for (Entity nearby : player.getNearbyEntities(THUNDER_LAND_RADIUS, THUNDER_LAND_RADIUS, THUNDER_LAND_RADIUS)) {
+            if (nearby instanceof LivingEntity victim && !victim.equals(player)) {
+                victim.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, THUNDER_SLOW_TICKS, 1));
+                victim.getWorld().strikeLightningEffect(victim.getLocation());
+            }
+        }
     }
 
     // ---------- 소서러 1 : 볼트마법 ----------
@@ -176,5 +366,10 @@ public class SkillEffects implements Listener {
         player.getWorld().playSound(from, Sound.ENTITY_ILLUSIONER_CAST_SPELL, 1f, 1.2f);
         player.sendActionBar(Component.text(skill.name() + " 사용!", NamedTextColor.AQUA));
         return true;
+    }
+
+    public void clear() {
+        blinks.clear();
+        leaps.clear();
     }
 }
