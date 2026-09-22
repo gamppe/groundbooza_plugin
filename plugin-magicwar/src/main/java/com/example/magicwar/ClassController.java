@@ -102,7 +102,7 @@ public class ClassController {
         classes.choose(player.getUniqueId(), magicClass);
         guide.refresh(player, classes.displayName(player.getUniqueId()));
         for (int i = 0; i < magicClass.skills().size(); i++) {
-            player.getInventory().addItem(skills.create(magicClass, i));
+            player.getInventory().addItem(skills.create(magicClass.skill(i), i, magicClass.label()));
         }
         player.playSound(player, Sound.BLOCK_ENCHANTMENT_TABLE_USE, 1f, 1.2f);
         player.sendMessage(Component.text(magicClass.label() + " 클래스를 선택했습니다.", NamedTextColor.GREEN));
@@ -128,7 +128,8 @@ public class ClassController {
         }
         classes.advance(uuid, picked);
         guide.refresh(player, classes.displayName(uuid));
-        player.getInventory().addItem(skills.createAdvanced(base, picked));
+        player.getInventory().addItem(skills.create(picked.skill(),
+                base.skills().size(), picked.label()));
         player.playSound(player, Sound.UI_TOAST_CHALLENGE_COMPLETE, 1f, 1f);
         player.sendMessage(Component.text(picked.label() + " (으)로 전직했습니다! 두번째 스킬을 얻었습니다.",
                 NamedTextColor.LIGHT_PURPLE));
@@ -156,6 +157,9 @@ public class ClassController {
         Inventory inv = Bukkit.createInventory(holder, ClassUpgradeHolder.SIZE,
                 Component.text(classes.displayName(uuid) + " 클래스"));
 
+        inv.setItem(ClassUpgradeHolder.SLOT_SKILLS, icon(Material.PAPER, "스킬", NamedTextColor.AQUA, List.of(
+                "지금까지 얻은 스킬 목록",
+                "클릭하여 열기")));
         inv.setItem(ClassUpgradeHolder.SLOT_CLASS, icon(
                 classes.hasAdvanced(uuid) ? classes.advancementOf(uuid).icon() : magicClass.icon(),
                 classes.displayName(uuid), NamedTextColor.GOLD, List.of(magicClass.blurb())));
@@ -170,6 +174,61 @@ public class ClassController {
 
         holder.setInventory(inv);
         player.openInventory(inv);
+    }
+
+    /** Every skill earned so far. Clicking one hands over another copy; shift-clicking stamps
+     * it onto whatever is in the player's hand instead. */
+    public void openSkills(Player player) {
+        List<ClassSkill> owned = classes.ownedSkills(player.getUniqueId());
+        SkillListHolder holder = new SkillListHolder();
+        Inventory inv = Bukkit.createInventory(holder, SkillListHolder.SIZE, Component.text("스킬 목록"));
+        for (int i = 0; i < owned.size(); i++) {
+            ClassSkill skill = owned.get(i);
+            inv.setItem(SkillListHolder.slotFor(i), icon(skill.icon(), "[" + (i + 1) + "] " + skill.name(),
+                    NamedTextColor.AQUA, List.of(
+                            "쿨타임 " + skill.cooldownSeconds() + "초",
+                            "",
+                            "클릭: 복사본 받기",
+                            "Shift+클릭: 손에 든 아이템에 부여")));
+        }
+        inv.setItem(SkillListHolder.SLOT_BACK, icon(Material.ARROW, "뒤로가기", NamedTextColor.YELLOW, List.of()));
+        holder.setInventory(inv);
+        player.openInventory(inv);
+    }
+
+    public void giveSkillCopy(Player player, int index) {
+        List<ClassSkill> owned = classes.ownedSkills(player.getUniqueId());
+        if (index < 0 || index >= owned.size()) {
+            return;
+        }
+        ClassSkill skill = owned.get(index);
+        player.getInventory().addItem(skills.create(skill, index, classes.displayName(player.getUniqueId())));
+        player.playSound(player, Sound.ENTITY_ITEM_PICKUP, 1f, 1.2f);
+        player.sendMessage(Component.text(skill.name() + " 복사본을 받았습니다.", NamedTextColor.AQUA));
+    }
+
+    /** Stamps a skill onto the held item, so that item casts on right-click too. Refuses an
+     * empty hand and anything that is already a skill - re-stamping would stack lore lines. */
+    public void bindSkill(Player player, int index) {
+        List<ClassSkill> owned = classes.ownedSkills(player.getUniqueId());
+        if (index < 0 || index >= owned.size()) {
+            return;
+        }
+        ItemStack held = player.getInventory().getItemInMainHand();
+        if (held.getType().isAir()) {
+            player.sendMessage(Component.text("스킬을 부여할 아이템을 손에 들고 Shift+클릭하세요.", NamedTextColor.RED));
+            return;
+        }
+        if (skills.isSkillItem(held)) {
+            player.sendMessage(Component.text("이미 스킬이 부여된 아이템입니다.", NamedTextColor.RED));
+            return;
+        }
+        ClassSkill skill = owned.get(index);
+        skills.bind(held, skill, index, classes.displayName(player.getUniqueId()));
+        player.playSound(player, Sound.BLOCK_ENCHANTMENT_TABLE_USE, 1f, 1.2f);
+        player.sendMessage(Component.text("손에 든 아이템에 " + skill.name() + " 을(를) 부여했습니다. 우클릭으로 사용하세요.",
+                NamedTextColor.AQUA));
+        openSkills(player);
     }
 
     /** Clicking either a quest icon or its wool tries to claim - the icon is the obvious target

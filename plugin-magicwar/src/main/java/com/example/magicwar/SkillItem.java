@@ -1,75 +1,88 @@
 package com.example.magicwar;
 
+import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.components.UseCooldownComponent;
 import org.bukkit.persistence.PersistentDataType;
 
+import java.util.ArrayList;
 import java.util.List;
 
-/** The castable items a class hands out, named "[1] 첫번째 스킬" and tagged with which class
- * and which slot they belong to. */
+/**
+ * Castable items. A skill is identified by its id alone, so the same skill can live on the
+ * banner pattern it ships as, on a copy pulled from the skill list, or stamped onto whatever
+ * the player was holding - all three cast the same way.
+ *
+ * <p>Every one of them carries a use_cooldown component pointing at the same cooldown group
+ * ({@code magicwar:<skill id>}), which is what makes copies share a cooldown and lets the
+ * vanilla sweep animation show on all of them at once.
+ */
 public class SkillItem {
 
-    private final NamespacedKey classKey;
-    private final NamespacedKey indexKey;
+    public static final String NAMESPACE = "magicwar";
+
+    private final NamespacedKey idKey;
+    private final NamespacedKey slotKey;
 
     public SkillItem(MagicWarPlugin plugin) {
-        this.classKey = new NamespacedKey(plugin, "skill_class");
-        this.indexKey = new NamespacedKey(plugin, "skill_index");
+        this.idKey = new NamespacedKey(plugin, "skill_id");
+        this.slotKey = new NamespacedKey(plugin, "skill_slot");
     }
 
-    public ItemStack create(MagicClass magicClass, int index) {
-        return build(magicClass, index, magicClass.skill(index), magicClass.label());
+    /** The cooldown group shared by every item carrying this skill. */
+    public static Key cooldownKey(ClassSkill skill) {
+        return Key.key(NAMESPACE, skill.id());
     }
 
-    /** The tier-2 skill. It keeps the base class's tag so casting resolves the same way, and
-     * takes the next free index after the starting skills. */
-    public ItemStack createAdvanced(MagicClass base, MagicClass.Advancement advancement) {
-        return build(base, base.skills().size(), advancement.skill(), advancement.label());
+    public ItemStack create(ClassSkill skill, int slot, String owner) {
+        return stamp(new ItemStack(skill.icon()), skill, slot, owner, false);
     }
 
-    private ItemStack build(MagicClass magicClass, int index, ClassSkill skill, String owner) {
-        ItemStack item = new ItemStack(skill.icon());
+    /** Puts the skill onto an item the player already has, leaving it otherwise as it was. */
+    public ItemStack bind(ItemStack target, ClassSkill skill, int slot, String owner) {
+        return stamp(target, skill, slot, owner, true);
+    }
+
+    private ItemStack stamp(ItemStack item, ClassSkill skill, int slot, String owner, boolean bound) {
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(Component.text("[" + (index + 1) + "] " + skill.name(), NamedTextColor.AQUA)
-                .decoration(TextDecoration.ITALIC, false));
-        meta.setEnchantmentGlintOverride(true);
-        meta.lore(List.of(
-                Component.text(owner + " 스킬", NamedTextColor.GRAY)
-                        .decoration(TextDecoration.ITALIC, false),
-                Component.text("우클릭하여 사용 · 쿨타임 " + skill.cooldownSeconds() + "초", NamedTextColor.DARK_GRAY)
-                        .decoration(TextDecoration.ITALIC, false)));
-        meta.getPersistentDataContainer().set(classKey, PersistentDataType.STRING, magicClass.name());
-        meta.getPersistentDataContainer().set(indexKey, PersistentDataType.INTEGER, index);
+        if (!bound) {
+            meta.displayName(Component.text("[" + (slot + 1) + "] " + skill.name(), NamedTextColor.AQUA)
+                    .decoration(TextDecoration.ITALIC, false));
+            meta.setEnchantmentGlintOverride(true);
+        }
+        List<Component> lore = new ArrayList<>(meta.hasLore() ? meta.lore() : List.of());
+        lore.add(Component.text((bound ? "부여된 스킬 " : "") + "[" + (slot + 1) + "] " + skill.name(),
+                NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false));
+        lore.add(Component.text(owner + " 스킬 · 우클릭하여 사용 · 쿨타임 " + skill.cooldownSeconds() + "초",
+                NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false));
+        meta.lore(lore);
+
+        // Same group on every copy → one shared cooldown, drawn on all of them.
+        UseCooldownComponent cooldown = meta.getUseCooldown();
+        cooldown.setCooldownSeconds(skill.cooldownSeconds());
+        cooldown.setCooldownGroup(new NamespacedKey(NAMESPACE, skill.id()));
+        meta.setUseCooldown(cooldown);
+
+        meta.getPersistentDataContainer().set(idKey, PersistentDataType.STRING, skill.id());
+        meta.getPersistentDataContainer().set(slotKey, PersistentDataType.INTEGER, slot);
         item.setItemMeta(meta);
         return item;
     }
 
-    public MagicClass classOf(ItemStack item) {
+    /** The skill id this item casts, or null when it is not a skill item. */
+    public String skillIdOf(ItemStack item) {
         if (item == null || !item.hasItemMeta()) {
             return null;
         }
-        String raw = item.getItemMeta().getPersistentDataContainer().get(classKey, PersistentDataType.STRING);
-        if (raw == null) {
-            return null;
-        }
-        try {
-            return MagicClass.valueOf(raw);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
+        return item.getItemMeta().getPersistentDataContainer().get(idKey, PersistentDataType.STRING);
     }
 
-    /** Slot the item casts, or -1 when it is not a skill item at all. */
-    public int indexOf(ItemStack item) {
-        if (item == null || !item.hasItemMeta()) {
-            return -1;
-        }
-        Integer index = item.getItemMeta().getPersistentDataContainer().get(indexKey, PersistentDataType.INTEGER);
-        return index == null ? -1 : index;
+    public boolean isSkillItem(ItemStack item) {
+        return skillIdOf(item) != null;
     }
 }

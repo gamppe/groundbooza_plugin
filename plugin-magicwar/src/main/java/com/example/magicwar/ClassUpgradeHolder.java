@@ -4,13 +4,14 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 
 /**
- * The class screen: the class icon alone on the top row, then the quest board - two quests on
+ * The class screen: the skill list in the top-left corner and the class icon on the top row, then the quest board - two quests on
  * row 2 (cols 4 and 6) and three on row 4 (cols 3, 5 and 7), each with its claim wool directly
  * underneath. The anvil in the bottom-right corner is 전직.
  */
 public class ClassUpgradeHolder implements InventoryHolder {
 
     public static final int SIZE = 54;
+    public static final int SLOT_SKILLS = 0;
     public static final int SLOT_CLASS = 4;
     public static final int SLOT_ADVANCE = 53;
 

@@ -1,5 +1,6 @@
 package com.example.magicwar;
 
+import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -55,40 +56,37 @@ public class ClassListener implements Listener {
             controller.open(player);
             return;
         }
-        int index = skillItems.indexOf(event.getItem());
-        if (index >= 0) {
+        String skillId = skillItems.skillIdOf(event.getItem());
+        if (skillId != null) {
             event.setCancelled(true);
-            cast(player, event.getItem(), index);
+            cast(player, skillId);
         }
     }
 
     /** Resolves which skill the item casts, gates it, then hands the effect to SkillEffects.
      * The cooldown uses the vanilla item cooldown, so the sweep animation comes for free, and
      * it is only started once the cast actually went through. */
-    private void cast(Player player, ItemStack item, int index) {
-        MagicClass magicClass = classes.classOf(player.getUniqueId());
-        if (magicClass == null) {
-            return;
-        }
-        ClassSkill skill = index < magicClass.skills().size()
-                ? magicClass.skill(index)
-                : advancedSkill(player);
+    private void cast(Player player, String skillId) {
+        ClassSkill skill = classes.skillById(player.getUniqueId(), skillId);
         if (skill == null) {
+            player.sendActionBar(Component.text("이 스킬을 배우지 않았습니다.", NamedTextColor.RED));
             return;
         }
         if (!arena.isRunning() || arena.isLobby(player.getWorld())) {
             player.sendActionBar(Component.text("아레나에서만 사용할 수 있습니다.", NamedTextColor.RED));
             return;
         }
-        if (player.hasCooldown(item)) {
-            player.sendActionBar(Component.text("쿨타임 " + (player.getCooldown(item) / 20 + 1) + "초",
+        // Cooldown lives on the group, not the item, so every copy of a skill shares it.
+        Key cooldown = SkillItem.cooldownKey(skill);
+        if (player.getCooldown(cooldown) > 0) {
+            player.sendActionBar(Component.text("쿨타임 " + (player.getCooldown(cooldown) / 20 + 1) + "초",
                     NamedTextColor.RED));
             return;
         }
         if (!effects.cast(player, skill)) {
             return;
         }
-        player.setCooldown(item, skill.cooldownSeconds() * 20);
+        player.setCooldown(cooldown, skill.cooldownSeconds() * 20);
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -127,6 +125,10 @@ public class ClassListener implements Listener {
                 || event.getClickedInventory() != event.getView().getTopInventory()) {
             return;
         }
+        if (event.getSlot() == ClassUpgradeHolder.SLOT_SKILLS) {
+            controller.openSkills(player);
+            return;
+        }
         if (event.getSlot() == ClassUpgradeHolder.SLOT_ADVANCE) {
             if (classes.hasAdvanced(player.getUniqueId())) {
                 return;
@@ -144,9 +146,30 @@ public class ClassListener implements Listener {
         }
     }
 
-    private ClassSkill advancedSkill(Player player) {
-        MagicClass.Advancement advancement = classes.advancementOf(player.getUniqueId());
-        return advancement == null ? null : advancement.skill();
+    @EventHandler(ignoreCancelled = true)
+    public void onSkillListClick(InventoryClickEvent event) {
+        if (!(event.getView().getTopInventory().getHolder() instanceof SkillListHolder)) {
+            return;
+        }
+        event.setCancelled(true);
+        if (!(event.getWhoClicked() instanceof Player player)
+                || event.getClickedInventory() != event.getView().getTopInventory()) {
+            return;
+        }
+        if (event.getSlot() == SkillListHolder.SLOT_BACK) {
+            controller.openBoard(player);
+            return;
+        }
+        int index = SkillListHolder.indexForSlot(event.getSlot(),
+                classes.ownedSkills(player.getUniqueId()).size());
+        if (index < 0) {
+            return;
+        }
+        if (event.isShiftClick()) {
+            controller.bindSkill(player, index);
+        } else {
+            controller.giveSkillCopy(player, index);
+        }
     }
 
     /** Closing the picker without choosing puts it straight back up - but only in the arena, so
