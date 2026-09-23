@@ -3,7 +3,6 @@ package com.example.magicwar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
-import org.bukkit.Color;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -117,10 +116,6 @@ public class SkillEffects implements Listener {
     private static final double ERUPTION_SPREAD_STEPS_PER_BLOCK = 1.5;
     /** Each lava block is only there for a moment, so the column reads as a spout. */
     private static final int ERUPTION_LAVA_TICKS = 20;
-    /** A flat grid of small dots: LAVA particles jump and spit, which made the circle hard to
-     * read at a glance. */
-    private static final Particle.DustOptions ERUPTION_MARKER =
-            new Particle.DustOptions(Color.fromRGB(255, 90, 0), 0.9f);
 
     private static final int DUST_RING_POINTS = 16;
     private static final double DUST_RING_RADIUS = 2.2;
@@ -140,6 +135,7 @@ public class SkillEffects implements Listener {
     private final FrostState frost;
     private final TempBlocks tempBlocks;
     private final SkillItem skillItems;
+    private final EruptionPreview preview;
     private final NamespacedKey waveShotKey;
     private final NamespacedKey boltKey;
     private final Random random = new Random();
@@ -149,13 +145,15 @@ public class SkillEffects implements Listener {
     private final Set<UUID> noFall = new HashSet<>();
 
     public SkillEffects(MagicWarPlugin plugin, ClassManager classes, SkillCooldowns cooldowns,
-                        FrostState frost, TempBlocks tempBlocks, SkillItem skillItems) {
+                        FrostState frost, TempBlocks tempBlocks, SkillItem skillItems,
+                        EruptionPreview preview) {
         this.plugin = plugin;
         this.classes = classes;
         this.cooldowns = cooldowns;
         this.frost = frost;
         this.tempBlocks = tempBlocks;
         this.skillItems = skillItems;
+        this.preview = preview;
         this.waveShotKey = new NamespacedKey(plugin, "wave_shot");
         this.boltKey = new NamespacedKey(plugin, "bolt");
     }
@@ -670,28 +668,36 @@ public class SkillEffects implements Listener {
         return area;
     }
 
-    /** Called every tick: shows the caster where the eruption would land. Sent to that player
-     * alone, so nobody else reads the telegraph. */
+    /** Called every tick: shows the caster where the eruption would land, and takes the marker
+     * away the instant it should not be there. */
     private void tickEruptionPreview() {
         for (Player player : Bukkit.getOnlinePlayers()) {
-            String heldId = skillItems.skillIdOf(player.getInventory().getItemInMainHand());
-            if (!"lava_eruption".equals(heldId)) {
-                continue;
-            }
-            ClassSkill skill = classes.skillById(player.getUniqueId(), heldId);
-            // Nothing to aim at while it is recharging, so the marker would only be noise.
-            if (skill == null || !cooldowns.ready(player, skill)) {
-                continue;
-            }
-            Block target = eruptionTarget(player);
+            Block target = previewTarget(player);
             if (target == null) {
+                preview.hide(player.getUniqueId());
                 continue;
             }
-            for (Block block : eruptionArea(target)) {
-                player.spawnParticle(Particle.DUST, block.getLocation().add(0.5, 1.05, 0.5),
-                        1, 0.0, 0.0, 0.0, 0.0, ERUPTION_MARKER);
+            List<Block> area = eruptionArea(target);
+            if (area.isEmpty()) {
+                preview.hide(player.getUniqueId());
+                continue;
             }
+            preview.show(player, target, area);
         }
+    }
+
+    /** What this player should be aiming at, or null when the marker has no business showing:
+     * not holding the skill, no longer owns it, still recharging, or aiming at the sky. */
+    private Block previewTarget(Player player) {
+        String heldId = skillItems.skillIdOf(player.getInventory().getItemInMainHand());
+        if (!"lava_eruption".equals(heldId)) {
+            return null;
+        }
+        ClassSkill skill = classes.skillById(player.getUniqueId(), heldId);
+        if (skill == null || !cooldowns.ready(player, skill)) {
+            return null;
+        }
+        return eruptionTarget(player);
     }
 
     private boolean lavaEruption(Player player) {
@@ -705,6 +711,7 @@ public class SkillEffects implements Listener {
             player.sendActionBar(Component.text("땅을 바라보고 시전하세요.", NamedTextColor.RED));
             return false;
         }
+        preview.hide(player.getUniqueId());
         // Centre outwards, so the eruption reads as spreading from where it was aimed.
         Location centre = target.getLocation();
         area.sort(Comparator.comparingDouble(block -> block.getLocation().distanceSquared(centre)));
@@ -832,5 +839,6 @@ public class SkillEffects implements Listener {
         blinks.clear();
         leaps.clear();
         noFall.clear();
+        preview.clear();
     }
 }
