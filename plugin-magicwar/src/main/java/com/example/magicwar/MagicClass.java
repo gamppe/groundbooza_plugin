@@ -50,18 +50,24 @@ public enum MagicClass {
                                     Material.FLOW_BANNER_PATTERN, 3, 3))))),
 
     SUMMONER("서머너", Material.PIG_SPAWN_EGG, "소환수를 부려 싸우는 술사",
-            List.of(new ClassSkill("pig_burst", "돼지 소환", Material.GUSTER_BANNER_PATTERN, 60)),
+            List.of(new ClassSkill("pig_burst", "돼지 소환", Material.GUSTER_BANNER_PATTERN, 40)),
             List.of(
-                    new Advancement("beastmaster", "비스트마스터", Material.WOLF_SPAWN_EGG, NamedTextColor.GREEN,
-                            new ClassSkill("beastmaster_2", "두번째 스킬", Material.BORDURE_INDENTED_BANNER_PATTERN, 20),
-                            Quest.kill("adv_beastmaster", "비스트마스터", NamedTextColor.GREEN,
-                                    "소 5마리 잡기", 5, Material.LEATHER, "비스트마스터 전직 해금",
-                                    EntityType.COW)),
-                    new Advancement("spiritcaller", "정령술사", Material.ALLAY_SPAWN_EGG, NamedTextColor.LIGHT_PURPLE,
-                            new ClassSkill("spiritcaller_2", "두번째 스킬", Material.FIELD_MASONED_BANNER_PATTERN, 20),
-                            Quest.kill("adv_spiritcaller", "정령술사", NamedTextColor.LIGHT_PURPLE,
-                                    "양 5마리 잡기", 5, Material.WHITE_WOOL, "정령술사 전직 해금",
-                                    EntityType.SHEEP))));
+                    new Advancement("necromancer", "네크로맨서", Material.WITHER_SKELETON_SKULL,
+                            NamedTextColor.DARK_PURPLE,
+                            new ClassSkill("corpse_explosion", "시체폭발",
+                                    Material.BORDURE_INDENTED_BANNER_PATTERN, 60),
+                            Quest.kill("adv_necromancer", "네크로맨서", NamedTextColor.DARK_PURPLE,
+                                    "소 5마리 잡기", 5, Material.LEATHER, "네크로맨서 전직 해금",
+                                    EntityType.COW),
+                            List.of(new ClassSkill("pig_burst", "돼지 소환",
+                                    Material.GUSTER_BANNER_PATTERN, 20))),
+                    new Advancement("druid", "드루이드", Material.BONE, NamedTextColor.GREEN,
+                            new ClassSkill("track", "흔적 추적", Material.FIELD_MASONED_BANNER_PATTERN, 60),
+                            Quest.kill("adv_druid", "드루이드", NamedTextColor.GREEN,
+                                    "양 5마리 잡기", 5, Material.WHITE_WOOL, "드루이드 전직 해금",
+                                    EntityType.SHEEP),
+                            List.of(new ClassSkill("pig_burst", "늑대 소환",
+                                    Material.GUSTER_BANNER_PATTERN, 40)))));
 
     /**
      * A tier-2 class: its own colour, its own extra skill, and the quest that unlocks it.

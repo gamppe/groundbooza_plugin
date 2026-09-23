@@ -19,6 +19,7 @@ public class MagicWarPlugin extends JavaPlugin {
     private SkillEffects skillEffects;
     private FrostState frostState;
     private TempBlocks tempBlocks;
+    private Summons summons;
     private ClassController classController;
 
     @Override
@@ -32,9 +33,10 @@ public class MagicWarPlugin extends JavaPlugin {
         this.skillItem = new SkillItem(this);
         this.skillCooldowns = new SkillCooldowns();
         this.tempBlocks = new TempBlocks();
+        this.summons = new Summons();
         SkillPreview skillPreview = new SkillPreview(this);
         this.frostState = new FrostState(this, tempBlocks);
-        SkillEffects skillEffects = new SkillEffects(this, classManager, skillCooldowns, frostState, tempBlocks, skillItem, skillPreview);
+        SkillEffects skillEffects = new SkillEffects(this, classManager, skillCooldowns, frostState, tempBlocks, skillItem, skillPreview, summons);
         this.arenaManager = new ArenaManager(this, new RoundSettings(config), classManager, questManager, classGuideItem);
         this.classController = new ClassController(this, classManager, questManager, classGuideItem, skillItem);
         arenaManager.setClassController(classController);
@@ -58,6 +60,7 @@ public class MagicWarPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(skillPreview, this);
         getServer().getScheduler().runTaskTimer(this, frostState::tick, 1L, 1L);
         getServer().getScheduler().runTaskTimer(this, tempBlocks::tick, 1L, 1L);
+        getServer().getScheduler().runTaskTimer(this, summons::tick, 1L, 1L);
         getServer().getScheduler().runTaskTimer(this, skillCooldowns::tick, 1L, 1L);
         getServer().getScheduler().runTaskTimer(this, skillEffects::tick, 1L, 1L);
         this.skillEffects = skillEffects;
@@ -97,5 +100,9 @@ public class MagicWarPlugin extends JavaPlugin {
 
     public TempBlocks getTempBlocks() {
         return tempBlocks;
+    }
+
+    public Summons getSummons() {
+        return summons;
     }
 }

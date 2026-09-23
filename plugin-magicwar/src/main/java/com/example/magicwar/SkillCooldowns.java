@@ -163,6 +163,18 @@ public class SkillCooldowns {
         }
     }
 
+    /** Brings the next charge forward. Used by 시체폭발, which pays the necromancer back for
+     * every death near them. */
+    public void reduce(Player player, ClassSkill skill, long millis) {
+        State state = of(player, skill);
+        if (state.nextRefillMillis == 0) {
+            return; // already full, nothing to bring forward
+        }
+        state.nextRefillMillis = Math.max(System.currentTimeMillis(), state.nextRefillMillis - millis);
+        refill(state, skill);
+        draw(player, skill, state);
+    }
+
     public void reset(UUID uuid) {
         states.remove(uuid);
     }

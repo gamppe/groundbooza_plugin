@@ -8,19 +8,25 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.Sound;
 import org.bukkit.entity.BreezeWindCharge;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Mob;
 import org.bukkit.entity.Pig;
+import org.bukkit.entity.PigZombie;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.entity.SmallFireball;
+import org.bukkit.entity.Wolf;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.persistence.PersistentDataType;
@@ -90,6 +96,23 @@ public class SkillEffects implements Listener {
     private static final double PIG_BLAST_DAMAGE = 6.0;
     private static final double PIG_BLAST_RADIUS = 3.0;
 
+    // ---------- 네크로맨서 ----------
+    /** Mob movement speed is roughly blocks-per-second over twenty, and a sprinting player
+     * covers 5.6 - so this is about nine tenths of that. */
+    private static final double PIG_CHASE_SPEED = 0.2526;
+    private static final int PIG_HUNTER_FUSE_TICKS = 10 * 20;
+    private static final int PIGLIN_FUSE_TICKS = 20 * 20;
+    private static final double PIGLIN_BLAST_DAMAGE = 6.0;
+    private static final long CORPSE_REFUND_MILLIS = 3000;
+    private static final double CORPSE_REFUND_RADIUS = 16;
+
+    // ---------- 드루이드 ----------
+    private static final int WOLF_PACK_SIZE = 5;
+    private static final int WOLF_PACK_TICKS = 20 * 20;
+    private static final int WOLF_PACK_SURVIVORS = 2;
+    private static final int WILD_WOLF_TICKS = 60 * 20;
+    private static final int TRACK_HASTE_TICKS = 20 * 20;
+
     // ---------- 뇌격 ----------
     private static final double THUNDER_LEAP = 1.9;
     private static final double THUNDER_DASH_SPEED = 1.8;
@@ -155,6 +178,9 @@ public class SkillEffects implements Listener {
     private final TempBlocks tempBlocks;
     private final SkillItem skillItems;
     private final SkillPreview preview;
+    private final Summons summons;
+    /** Players 흔적 추적 has already given away, per caster - one report each. */
+    private final Map<UUID, Set<UUID>> tracked = new HashMap<>();
     private final NamespacedKey waveShotKey;
     private final NamespacedKey boltKey;
     private final NamespacedKey summonedPigKey;
@@ -168,7 +194,7 @@ public class SkillEffects implements Listener {
 
     public SkillEffects(MagicWarPlugin plugin, ClassManager classes, SkillCooldowns cooldowns,
                         FrostState frost, TempBlocks tempBlocks, SkillItem skillItems,
-                        SkillPreview preview) {
+                        SkillPreview preview, Summons summons) {
         this.plugin = plugin;
         this.classes = classes;
         this.cooldowns = cooldowns;
@@ -176,6 +202,7 @@ public class SkillEffects implements Listener {
         this.tempBlocks = tempBlocks;
         this.skillItems = skillItems;
         this.preview = preview;
+        this.summons = summons;
         this.waveShotKey = new NamespacedKey(plugin, "wave_shot");
         this.boltKey = new NamespacedKey(plugin, "bolt");
         this.summonedPigKey = new NamespacedKey(plugin, "summoned_pig");
@@ -202,6 +229,8 @@ public class SkillEffects implements Listener {
             case "ice_spike" -> iceSpike(player);
             case "lava_eruption" -> lavaEruption(player);
             case "lightning_rod" -> lightningRod(player);
+            case "corpse_explosion" -> corpseExplosion(player);
+            case "track" -> track(player);
             default -> placeholder(player, skill);
         };
     }
@@ -238,6 +267,14 @@ public class SkillEffects implements Listener {
 
     private boolean isElectromancer(Player player) {
         return isAdvancement(player, "electromancer");
+    }
+
+    private boolean isNecromancer(Player player) {
+        return isAdvancement(player, "necromancer");
+    }
+
+    private boolean isDruid(Player player) {
+        return isAdvancement(player, "druid");
     }
 
     private boolean isAdvancement(Player player, String id) {
@@ -974,6 +1011,13 @@ public class SkillEffects implements Listener {
         if (!(projectile.getShooter() instanceof Player shooter)) {
             return;
         }
+        if (firedBy.equals("track")) {
+            Location at = event.getHitBlock() != null
+                    ? event.getHitBlock().getLocation().add(0.5, 1, 0.5)
+                    : projectile.getLocation();
+            releaseWildWolves(shooter, at);
+            return;
+        }
         Entity hit = event.getHitEntity();
         boolean rod = firedBy.equals("lightning_rod");
         if (hit instanceof LivingEntity target && !target.equals(shooter)) {
@@ -998,21 +1042,178 @@ public class SkillEffects implements Listener {
     /** Ten pigs thrown outwards from where the caster stands, evenly around the circle with a
      * little jitter so it reads as a burst rather than a formation. */
     private boolean pigBurst(Player player) {
+        if (isDruid(player)) {
+            return wolfPack(player);
+        }
+        boolean hunters = isNecromancer(player);
         Location centre = player.getLocation();
         for (int i = 0; i < PIG_COUNT; i++) {
             double angle = Math.PI * 2 * i / PIG_COUNT + random.nextDouble() * 0.3;
             double speed = PIG_SCATTER_SPEED * (0.8 + random.nextDouble() * 0.4);
             Pig pig = centre.getWorld().spawn(centre, Pig.class);
             pig.getPersistentDataContainer().set(summonedPigKey, PersistentDataType.BOOLEAN, true);
-            pig.setPersistent(false);
             pig.setVelocity(new Vector(Math.cos(angle) * speed, PIG_SCATTER_LIFT, Math.sin(angle) * speed));
-            Bukkit.getScheduler().runTaskLater(plugin, () -> detonatePig(pig, player), PIG_FUSE_TICKS);
+
+            if (hunters) {
+                AttributeInstance speedAttribute = pig.getAttribute(Attribute.MOVEMENT_SPEED);
+                if (speedAttribute != null) {
+                    speedAttribute.setBaseValue(PIG_CHASE_SPEED);
+                }
+                // A pig has no attack AI of its own, so it is walked at its quarry instead.
+                summons.add(pig, player, Summons.Kind.PIG, Summons.Chase.PATHFIND,
+                        Summons.Prey.PLAYERS_AND_MOBS, PIG_HUNTER_FUSE_TICKS,
+                        mob -> detonatePig((Pig) mob, player));
+            } else {
+                summons.add(pig, player, Summons.Kind.PIG, Summons.Chase.NONE,
+                        Summons.Prey.PLAYERS_AND_MOBS, PIG_FUSE_TICKS,
+                        mob -> detonatePig((Pig) mob, player));
+            }
         }
         centre.getWorld().spawnParticle(Particle.EXPLOSION, centre.clone().add(0, 1, 0), 3, 0.3, 0.3, 0.3);
         centre.getWorld().playSound(centre, Sound.ENTITY_PIG_AMBIENT, 1.4f, 0.8f);
         centre.getWorld().playSound(centre, Sound.ENTITY_GENERIC_EXPLODE, 0.8f, 1.6f);
         return true;
     }
+
+    // ---------- 드루이드 1 : 늑대 소환 ----------
+
+    /** Five tame wolves. They fight for the caster on their own - a tamed wolf already answers
+     * what its owner hits - so nothing steers them; after twenty seconds all but two wander off. */
+    private boolean wolfPack(Player player) {
+        Location centre = player.getLocation();
+        List<Wolf> pack = new ArrayList<>();
+        for (int i = 0; i < WOLF_PACK_SIZE; i++) {
+            Wolf wolf = centre.getWorld().spawn(centre, Wolf.class);
+            wolf.setTamed(true);
+            wolf.setOwner(player);
+            summons.add(wolf, player, Summons.Kind.WOLF_PET, Summons.Chase.NONE,
+                    Summons.Prey.PLAYERS_AND_MOBS, Integer.MAX_VALUE / 100, mob -> { });
+            pack.add(wolf);
+        }
+        centre.getWorld().playSound(centre, Sound.ENTITY_WOLF_ANGRY_AMBIENT, 1.2f, 1f);
+
+        // Keeping two is group business, not something each wolf can decide for itself.
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            List<Wolf> alive = pack.stream().filter(Wolf::isValid).toList();
+            for (int i = WOLF_PACK_SURVIVORS; i < alive.size(); i++) {
+                Wolf leaving = alive.get(i);
+                leaving.getWorld().spawnParticle(Particle.POOF, leaving.getLocation().add(0, 0.5, 0),
+                        12, 0.3, 0.3, 0.3, 0.02);
+                summons.forget(leaving);
+                leaving.remove();
+            }
+        }, WOLF_PACK_TICKS);
+        return true;
+    }
+
+    // ---------- 네크로맨서 2 : 시체폭발 ----------
+
+    /** Sets off every pig at once and leaves a piglin standing in each crater. */
+    private boolean corpseExplosion(Player player) {
+        List<Mob> pigs = summons.of(player, Summons.Kind.PIG);
+        if (pigs.isEmpty()) {
+            player.sendActionBar(Component.text("터뜨릴 소환수가 없습니다.", NamedTextColor.RED));
+            return false;
+        }
+        for (Mob pig : pigs) {
+            Location at = pig.getLocation().clone();
+            summons.forget(pig);
+            detonatePig((Pig) pig, player);
+            raisePiglin(player, at);
+        }
+        return true;
+    }
+
+    private void raisePiglin(Player caster, Location at) {
+        PigZombie piglin = at.getWorld().spawn(at, PigZombie.class);
+        piglin.getEquipment().clear(); // raised bare-handed, not armed from the piglin loot table
+        piglin.setAngry(true);
+        piglin.setAdult();
+        summons.add(piglin, caster, Summons.Kind.PIGLIN, Summons.Chase.ATTACK,
+                Summons.Prey.PLAYERS_AND_MOBS, PIGLIN_FUSE_TICKS, mob -> detonatePiglin(mob, caster));
+        at.getWorld().spawnParticle(Particle.SOUL, at.clone().add(0, 0.5, 0), 20, 0.3, 0.5, 0.3, 0.02);
+    }
+
+    private void detonatePiglin(Mob piglin, Player caster) {
+        if (!piglin.isValid()) {
+            return;
+        }
+        Location at = piglin.getLocation();
+        piglin.remove();
+        at.getWorld().spawnParticle(Particle.EXPLOSION, at.clone().add(0, 0.5, 0), 3, 0.3, 0.3, 0.3);
+        at.getWorld().playSound(at, Sound.ENTITY_GENERIC_EXPLODE, 1.2f, 0.9f);
+        for (Entity nearby : at.getWorld().getNearbyEntities(at, PIG_BLAST_RADIUS, PIG_BLAST_RADIUS, PIG_BLAST_RADIUS)) {
+            if (nearby instanceof LivingEntity victim && !victim.equals(caster) && !summons.isSummon(nearby)) {
+                victim.damage(PIGLIN_BLAST_DAMAGE, caster);
+            }
+        }
+    }
+
+    /** Every death near a necromancer buys back a little of 시체폭발. */
+    @EventHandler(ignoreCancelled = true)
+    public void onNearbyDeath(EntityDeathEvent event) {
+        for (Player player : event.getEntity().getWorld().getPlayers()) {
+            if (!isNecromancer(player)
+                    || player.getLocation().distance(event.getEntity().getLocation()) > CORPSE_REFUND_RADIUS) {
+                continue;
+            }
+            ClassSkill skill = classes.skillById(player.getUniqueId(), "corpse_explosion");
+            if (skill != null) {
+                cooldowns.reduce(player, skill, CORPSE_REFUND_MILLIS);
+            }
+        }
+    }
+
+    // ---------- 드루이드 2 : 흔적 추적 ----------
+
+    private boolean track(Player player) {
+        tracked.put(player.getUniqueId(), new HashSet<>());
+        launchBolt(player, "track");
+        summons.boostSpeed(player, TRACK_HASTE_TICKS, 0);
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_WOLF_ANGRY_AMBIENT, 1.2f, 1.4f);
+        return true;
+    }
+
+    /** A wild wolf per rival, loosed where the shot landed. They are not the caster's pets -
+     * they hunt players and report where they found them. */
+    private void releaseWildWolves(Player caster, Location at) {
+        int rivals = (int) at.getWorld().getPlayers().stream().filter(p -> !p.equals(caster)).count();
+        for (int i = 0; i < Math.max(1, rivals); i++) {
+            Wolf wolf = at.getWorld().spawn(at, Wolf.class);
+            wolf.setAngry(true);
+            summons.add(wolf, caster, Summons.Kind.WOLF_WILD, Summons.Chase.ATTACK,
+                    Summons.Prey.PLAYERS_ONLY, WILD_WOLF_TICKS, Mob::remove);
+        }
+        at.getWorld().playSound(at, Sound.ENTITY_WOLF_ANGRY_GROWL, 1.4f, 0.8f);
+    }
+
+    /** The point of the skill: a wolf that lands a bite, or takes one, gives its quarry away. */
+    @EventHandler(ignoreCancelled = true)
+    public void onWildWolfContact(EntityDamageByEntityEvent event) {
+        Entity wolf = event.getDamager();
+        Entity other = event.getEntity();
+        if (!(wolf instanceof Wolf) || !(other instanceof Player)) {
+            Entity swap = wolf;
+            wolf = other;
+            other = swap;
+        }
+        if (!(wolf instanceof Wolf) || !(other instanceof Player quarry) || !summons.isSummon(wolf)) {
+            return;
+        }
+        for (Map.Entry<UUID, Set<UUID>> entry : tracked.entrySet()) {
+            Player caster = Bukkit.getPlayer(entry.getKey());
+            if (caster == null || !entry.getValue().add(quarry.getUniqueId())) {
+                continue; // already given away this one
+            }
+            Location at = quarry.getLocation();
+            caster.sendMessage(Component.text("[추적] ", NamedTextColor.GREEN)
+                    .append(Component.text(quarry.getName() + " — "
+                            + at.getBlockX() + ", " + at.getBlockY() + ", " + at.getBlockZ(),
+                            NamedTextColor.WHITE)));
+        }
+    }
+
+    // ---------- not written yet ----------
 
     /** Done by hand rather than with createExplosion: that would knock holes in the arena and
      * would not know to spare the summoner. Other summoned pigs are spared too, or the first
@@ -1061,6 +1262,7 @@ public class SkillEffects implements Listener {
 
     public void clear() {
         blinks.clear();
+        tracked.clear();
         shocks.keySet().forEach(id -> {
             if (Bukkit.getEntity(id) instanceof LivingEntity alive) {
                 alive.removePotionEffect(PotionEffectType.GLOWING);
