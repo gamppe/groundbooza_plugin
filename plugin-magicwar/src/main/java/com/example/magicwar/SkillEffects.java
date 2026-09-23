@@ -77,7 +77,7 @@ public class SkillEffects implements Listener {
     private static final int SHOCK_SECONDS = 5;
     private static final int SHOCK_MAX_STACKS = 3;
     private static final int ROD_DELAY_TICKS = 12; // 0.6s
-    private static final int ROD_REPEAT_TICKS = 6;
+    private static final int ROD_REPEAT_TICKS = 10;
     /** Vanilla lightning deals 5, under the 8 that would have made it worth faking. */
     private static final double ROD_BOLT_DAMAGE = 2.0;
 
@@ -901,6 +901,9 @@ public class SkillEffects implements Listener {
         int stacks = current == null || current.expiresAtMillis() <= System.currentTimeMillis()
                 ? 1 : Math.min(SHOCK_MAX_STACKS, current.stacks() + 1);
         shocks.put(victim.getUniqueId(), new Shock(stacks, System.currentTimeMillis() + SHOCK_SECONDS * 1000L));
+        // Outlined for everyone, so a charged target is worth chasing. The effect times itself
+        // out alongside the stack, which saves having to switch the glow back off.
+        victim.addPotionEffect(new PotionEffect(PotionEffectType.GLOWING, SHOCK_SECONDS * 20, 0, false, false));
     }
 
     private int shockStacks(Entity entity) {
@@ -908,7 +911,8 @@ public class SkillEffects implements Listener {
         return shock == null || shock.expiresAtMillis() <= System.currentTimeMillis() ? 0 : shock.stacks();
     }
 
-    /** Sparks over anything still carrying a charge, and drops the lapsed marks. */
+    /** Sparks over anything still carrying a charge, and drops the lapsed marks. The glow
+     * expires on its own timer, so nothing has to be undone here. */
     private void tickShocks() {
         long now = System.currentTimeMillis();
         Iterator<Map.Entry<UUID, Shock>> it = shocks.entrySet().iterator();
@@ -1014,6 +1018,11 @@ public class SkillEffects implements Listener {
 
     public void clear() {
         blinks.clear();
+        shocks.keySet().forEach(id -> {
+            if (Bukkit.getEntity(id) instanceof LivingEntity alive) {
+                alive.removePotionEffect(PotionEffectType.GLOWING);
+            }
+        });
         shocks.clear();
         leaps.clear();
         noFall.clear();
