@@ -53,6 +53,7 @@ public class MagicWarPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(skillEffects, this);
         getServer().getPluginManager().registerEvents(frostState, this);
         getServer().getScheduler().runTaskTimer(this, frostState::tick, 1L, 1L);
+        getServer().getScheduler().runTaskTimer(this, skillCooldowns::tick, 1L, 1L);
         getServer().getScheduler().runTaskTimer(this, skillEffects::tick, 1L, 1L);
         this.skillEffects = skillEffects;
         getServer().getPluginManager().registerEvents(new QuestListener(arenaManager, classManager, questManager), this);

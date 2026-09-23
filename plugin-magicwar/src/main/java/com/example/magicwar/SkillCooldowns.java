@@ -1,6 +1,9 @@
 package com.example.magicwar;
 
 import net.kyori.adventure.key.Key;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
 import java.util.HashMap;
@@ -17,7 +20,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * with whatever time was left.
  *
  * <p>Charges work the same way: vanilla has no notion of them, so the count is kept here and
- * refilled one per cooldown, and the sweep only appears once the last one is spent.
+ * refilled one per cooldown. For those the sweep is a refill timer rather than a lockout - it
+ * runs whenever anything is still coming back, even with charges in hand.
  */
 public class SkillCooldowns {
 
@@ -29,6 +33,9 @@ public class SkillCooldowns {
         boolean suspended;
         /** What to draw while suspended: the follow-up window in ticks, or 0 for nothing. */
         int suspendedDisplayTicks;
+        /** Kept so the ticker can refill and announce without being told which skill it is.
+         * Re-set on every lookup, since an advancement can re-time a skill under the same id. */
+        ClassSkill skill;
 
         State(int charges) {
             this.charges = charges;
@@ -38,8 +45,10 @@ public class SkillCooldowns {
     private final Map<UUID, Map<String, State>> states = new ConcurrentHashMap<>();
 
     private State of(Player player, ClassSkill skill) {
-        return states.computeIfAbsent(player.getUniqueId(), u -> new HashMap<>())
+        State state = states.computeIfAbsent(player.getUniqueId(), u -> new HashMap<>())
                 .computeIfAbsent(skill.id(), id -> new State(skill.charges()));
+        state.skill = skill;
+        return state;
     }
 
     /** Hands back any charges that have come due since the last look. */
@@ -115,12 +124,43 @@ public class SkillCooldowns {
             player.setCooldown(key, state.suspendedDisplayTicks);
             return;
         }
-        if (state.charges > 0 || state.nextRefillMillis == 0) {
-            player.setCooldown(key, 0);
+        if (state.nextRefillMillis == 0) {
+            player.setCooldown(key, 0); // fully charged
             return;
         }
+        // Shown even with charges to spare: on a charge skill the sweep is the refill timer,
+        // not a lockout, so it keeps running until the last charge is back.
         int ticks = (int) Math.max(1, (state.nextRefillMillis - System.currentTimeMillis()) / 50);
         player.setCooldown(key, ticks);
+    }
+
+    /**
+     * Called every tick from the plugin. The sweep animates client-side once set, so this only
+     * redraws when a charge actually lands - and says so, since a returning charge is the one
+     * thing a player cannot see coming any other way.
+     */
+    public void tick() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            Map<String, State> mine = states.get(player.getUniqueId());
+            if (mine == null) {
+                continue;
+            }
+            for (State state : mine.values()) {
+                if (state.skill == null || state.nextRefillMillis == 0) {
+                    continue;
+                }
+                int before = state.charges;
+                refill(state, state.skill);
+                if (state.charges == before) {
+                    continue;
+                }
+                draw(player, state.skill, state);
+                if (state.skill.charges() > 1) {
+                    player.sendActionBar(Component.text(state.skill.name()
+                            + " (" + state.charges + "/" + state.skill.charges() + ")", NamedTextColor.AQUA));
+                }
+            }
+        }
     }
 
     public void reset(UUID uuid) {
