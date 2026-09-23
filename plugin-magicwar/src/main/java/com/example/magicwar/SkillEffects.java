@@ -1268,6 +1268,10 @@ public class SkillEffects implements Listener {
                 hurt(caster, victim, PIGLIN_BLAST_DAMAGE);
             }
         }
+        // "소환수가 폭발할 때" - the piglin is one too, so it leaves the same thing behind.
+        if (hasPerk(caster, Perks.NECRO_SILVERFISH) && random.nextDouble() < NECRO_SILVERFISH_CHANCE) {
+            raiseSilverfish(caster, at);
+        }
     }
 
     /** Every death near a necromancer buys back a little of 시체폭발. */
@@ -1288,20 +1292,16 @@ public class SkillEffects implements Listener {
         }
     }
 
-    /** A baby zoglin at the necromancer's feet. Zoglins go for anything that moves without
-     * being told to, so it is loosed rather than commanded - and it is not a summon, so it will
-     * happily bite its maker too. */
+    /** A baby zoglin at the necromancer's feet. A zoglin attacks anything that moves, which is
+     * the point - registering it as a summon is what keeps "anything" from including the
+     * necromancer and the rest of their side. */
     private void raiseZoglin(Player caster) {
         Location at = caster.getLocation();
         Zoglin zoglin = at.getWorld().spawn(at, Zoglin.class);
         zoglin.setBaby();
-        zoglin.setPersistent(false);
+        summons.add(zoglin, caster, Summons.Kind.ZOGLIN, Summons.Chase.ATTACK,
+                Summons.Prey.PLAYERS_AND_MOBS, NECRO_SPAWN_TICKS, Mob::remove);
         at.getWorld().spawnParticle(Particle.SOUL, at.clone().add(0, 0.5, 0), 15, 0.3, 0.5, 0.3, 0.02);
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (zoglin.isValid()) {
-                zoglin.remove();
-            }
-        }, NECRO_SPAWN_TICKS);
     }
 
     // ---------- 드루이드 2 : 흔적 추적 ----------
@@ -1376,26 +1376,24 @@ public class SkillEffects implements Listener {
         at.getWorld().playSound(at, Sound.ENTITY_GENERIC_EXPLODE, 1f, 1.3f);
 
         for (Entity nearby : at.getWorld().getNearbyEntities(at, PIG_BLAST_RADIUS, PIG_BLAST_RADIUS, PIG_BLAST_RADIUS)) {
-            if (!(nearby instanceof LivingEntity victim) || victim.equals(caster) || isSummonedPig(nearby)) {
+            if (!(nearby instanceof LivingEntity victim) || victim.equals(caster)
+                    || isSummonedPig(nearby) || summons.isOwnedBy(nearby, caster)) {
                 continue;
             }
             hurt(caster, victim, PIG_BLAST_DAMAGE);
         }
         if (hasPerk(caster, Perks.NECRO_SILVERFISH) && random.nextDouble() < NECRO_SILVERFISH_CHANCE) {
-            raiseSilverfish(at);
+            raiseSilverfish(caster, at);
         }
     }
 
-    /** Left behind in the crater and hostile to everyone, the summoner included - it is debris,
-     * not a pet, so it is deliberately not registered as a summon. */
-    private void raiseSilverfish(Location at) {
+    /** Left behind in the crater, hunting whatever the necromancer is hunting. Registered as a
+     * summon so it counts as one of theirs - Summons keeps it off its own side, and the blasts
+     * below spare it. */
+    private void raiseSilverfish(Player caster, Location at) {
         Silverfish silverfish = at.getWorld().spawn(at, Silverfish.class);
-        silverfish.setPersistent(false);
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (silverfish.isValid()) {
-                silverfish.remove();
-            }
-        }, NECRO_SPAWN_TICKS);
+        summons.add(silverfish, caster, Summons.Kind.SILVERFISH, Summons.Chase.ATTACK,
+                Summons.Prey.PLAYERS_AND_MOBS, NECRO_SPAWN_TICKS, Mob::remove);
     }
 
     private boolean isSummonedPig(Entity entity) {

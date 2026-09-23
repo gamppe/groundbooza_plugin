@@ -12,6 +12,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
+import org.bukkit.event.entity.EntityTargetEvent;
 import org.bukkit.event.entity.EntityTargetLivingEntityEvent;
 import org.bukkit.projectiles.ProjectileSource;
 
@@ -79,19 +80,32 @@ public class PerkListener implements Listener {
         }
     }
 
-    /** 네크로맨서: the ordinary undead lose interest. Anything a player pointed at them still
-     * fights back - this only stops them picking the target themselves. */
+    /**
+     * 네크로맨서: the ordinary undead lose interest. Only unprovoked picks are taken away - hit
+     * a zombie and it still hits back, and one set on the necromancer by another player's magic
+     * still comes, since the peace is with the dead rather than with whoever is commanding them.
+     *
+     * <p>The pick is cleared rather than the event cancelled: a cancel only refuses the change,
+     * so a zombie that had already locked on would simply keep coming.
+     */
     @EventHandler(ignoreCancelled = true)
     public void onTarget(EntityTargetLivingEntityEvent event) {
         if (!(event.getTarget() instanceof Player player)
                 || !(event.getEntity() instanceof LivingEntity mob)
-                || mob.getCategory() != EntityCategory.UNDEAD) {
+                || mob.getCategory() != EntityCategory.UNDEAD
+                || PROVOKED.contains(event.getReason())) {
             return;
         }
         if (perks.has(player.getUniqueId(), Perks.UNDEAD_PEACE)) {
-            event.setCancelled(true);
+            event.setTarget(null);
         }
     }
+
+    /** Reasons the undead are allowed to keep: being hit, and being pointed at someone. */
+    private static final Set<EntityTargetEvent.TargetReason> PROVOKED = Set.of(
+            EntityTargetEvent.TargetReason.TARGET_ATTACKED_ENTITY,
+            EntityTargetEvent.TargetReason.TARGET_ATTACKED_NEARBY_ENTITY,
+            EntityTargetEvent.TargetReason.CUSTOM);
 
     @EventHandler(ignoreCancelled = true)
     public void onSummonDeath(EntityDeathEvent event) {

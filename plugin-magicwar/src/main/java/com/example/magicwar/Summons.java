@@ -5,6 +5,9 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityTargetLivingEntityEvent;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
@@ -23,10 +26,16 @@ import java.util.function.Consumer;
  * enough to hand it a target; a pig has none, so it has to be pathed at its quarry by hand
  * every so often. Retargeting is on a slow tick - a summon that picks a new victim four times
  * a second looks twitchy and costs a scan each time.
+ *
+ * <p>Whose side a summon is on is enforced here rather than left to each mob: the ones with
+ * vanilla hostility of their own (a zoglin attacks everything, an angry piglin goes for the
+ * nearest player) would otherwise turn on the summoner between retargets. {@link #onTarget}
+ * takes those picks away, so a caster is never a target for their own side and neither are
+ * their other summons.
  */
-public class Summons {
+public class Summons implements Listener {
 
-    public enum Kind { PIG, PIGLIN, WOLF_PET, WOLF_WILD }
+    public enum Kind { PIG, PIGLIN, WOLF_PET, WOLF_WILD, SILVERFISH, ZOGLIN }
 
     /** How a summon pursues: not at all, by walking, or by attacking. */
     public enum Chase { NONE, PATHFIND, ATTACK }
@@ -72,6 +81,29 @@ public class Summons {
 
     public boolean isSummon(Entity entity) {
         return summonIds.contains(entity.getUniqueId());
+    }
+
+    public boolean isOwnedBy(Entity entity, Player caster) {
+        return caster.getUniqueId().equals(ownerOf(entity));
+    }
+
+    /**
+     * Nothing a caster raised may turn on them or on each other. Vanilla picks targets from the
+     * mob's own goals, so this is the only place that can say no - and it says it by clearing
+     * the pick rather than cancelling, which would leave whatever the mob was already chasing.
+     *
+     * <p>Another player's summons are still fair game; only the ones sharing an owner are kin.
+     */
+    @EventHandler(ignoreCancelled = true)
+    public void onTarget(EntityTargetLivingEntityEvent event) {
+        UUID owner = ownerOf(event.getEntity());
+        LivingEntity target = event.getTarget();
+        if (owner == null || target == null) {
+            return;
+        }
+        if (owner.equals(target.getUniqueId()) || owner.equals(ownerOf(target))) {
+            event.setTarget(null);
+        }
     }
 
     /** Whose summon this is, or null when it is nobody's. */

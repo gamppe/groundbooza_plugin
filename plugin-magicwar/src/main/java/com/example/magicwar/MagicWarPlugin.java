@@ -68,6 +68,7 @@ public class MagicWarPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(strengthPotion, this);
         getServer().getPluginManager().registerEvents(new PerkListener(perks, summons), this);
         getServer().getPluginManager().registerEvents(new PortalLock(), this);
+        getServer().getPluginManager().registerEvents(summons, this);
         getServer().getScheduler().runTaskTimer(this, frostState::tick, 1L, 1L);
         getServer().getScheduler().runTaskTimer(this, tempBlocks::tick, 1L, 1L);
         getServer().getScheduler().runTaskTimer(this, summons::tick, 1L, 1L);
