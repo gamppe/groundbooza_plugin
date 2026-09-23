@@ -320,6 +320,13 @@ public class SkillEffects implements Listener {
         if (leapReady(player)) {
             return thunderDash(player);
         }
+        // A leap only ever starts from the ground. Without this, a press in mid-air after the
+        // dash was already spent simply launched again - endless hopping, and free, because a
+        // refused cast costs no cooldown either.
+        if (!player.isOnGround() || player.isFlying()) {
+            player.sendActionBar(Component.text("땅에 서 있어야 시전할 수 있습니다.", NamedTextColor.RED));
+            return false;
+        }
         player.setVelocity(player.getVelocity().setY(THUNDER_LEAP));
         leaps.put(player.getUniqueId(), new Leap(false, false, System.currentTimeMillis()));
         noFall.add(player.getUniqueId());
@@ -329,10 +336,12 @@ public class SkillEffects implements Listener {
         return true;
     }
 
-    /** The dash is only offered while the leap is still in the air and has not been spent. */
+    /** The dash is only offered while the leap is still in the air and has not been spent.
+     * Flight is excluded: a flying player never reports touching down, so the leap would hang
+     * open forever. */
     private boolean leapReady(Player player) {
         Leap leap = leaps.get(player.getUniqueId());
-        return leap != null && !leap.dashed() && !player.isOnGround();
+        return leap != null && !leap.dashed() && !player.isOnGround() && !player.isFlying();
     }
 
     /** The leap is high enough that the landing would otherwise hurt more than the skill does. */
@@ -374,6 +383,13 @@ public class SkillEffects implements Listener {
                 if (player != null) {
                     showFollowUp(player, "thunder_strike", false);
                 }
+                continue;
+            }
+            if (player.isFlying()) {
+                // Taking off mid-skill: treat it as over rather than waiting for a landing
+                // that will never be reported.
+                it.remove();
+                showFollowUp(player, "thunder_strike", false);
                 continue;
             }
             if (!player.isOnGround()) {
