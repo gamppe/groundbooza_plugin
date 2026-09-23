@@ -1,12 +1,14 @@
 package com.example.magicwar;
 
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityTargetLivingEntityEvent;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
@@ -32,6 +34,11 @@ import java.util.function.Consumer;
  * nearest player) would otherwise turn on the summoner between retargets. {@link #onTarget}
  * takes those picks away, so a caster is never a target for their own side and neither are
  * their other summons.
+ *
+ * <p>Fire is the other thing vanilla gets wrong for these: the nether mobs among them are
+ * fireproof, which in an arena full of lava and lightning makes a raised piglin far harder to
+ * put down than the pig it came from. There is no API to take the immunity off, and an immune
+ * mob never raises a damage event at all, so {@link #burn} does the burning by hand.
  */
 public class Summons implements Listener {
 
@@ -46,6 +53,18 @@ public class Summons implements Listener {
     private static final double HUNT_RADIUS = 40;
     private static final int RETARGET_INTERVAL_TICKS = 10;
 
+    /** The kinds vanilla would spare, being nether mobs. */
+    private static final Set<Kind> FIREPROOF = Set.of(Kind.PIGLIN, Kind.ZOGLIN);
+    /** A second apart, which is also the length of the invulnerability a hit grants - any
+     * faster and half the ticks would be swallowed. */
+    private static final int BURN_INTERVAL_TICKS = 20;
+    private static final int BURN_SECONDS = 8;
+    private static final double LAVA_DAMAGE = 6.0;
+    private static final double FIRE_DAMAGE = 1.0;
+    /** Blocks that set something alight by standing on them rather than in them. */
+    private static final Set<Material> HOT_FLOOR = Set.of(
+            Material.MAGMA_BLOCK, Material.CAMPFIRE, Material.SOUL_CAMPFIRE, Material.LAVA);
+
     private static final class Summon {
         final Mob mob;
         final UUID casterId;
@@ -54,6 +73,8 @@ public class Summons implements Listener {
         final Prey prey;
         final long expiresAtMillis;
         final Consumer<Mob> onExpire;
+        /** Ticks of burning left, for the kinds that have to be set alight by hand. */
+        int burning;
 
         Summon(Mob mob, UUID casterId, Kind kind, Chase chase, Prey prey,
                long expiresAtMillis, Consumer<Mob> onExpire) {
@@ -192,8 +213,57 @@ public class Summons implements Listener {
             if (retarget && summon.chase != Chase.NONE) {
                 pursue(summon);
             }
+            if (tickCounter % BURN_INTERVAL_TICKS == 0 && FIREPROOF.contains(summon.kind)) {
+                burn(summon);
+            }
         }
         expired.forEach(Runnable::run);
+    }
+
+    /**
+     * Standing in fire or lava hurts, and keeps hurting for a while afterwards. The flames are
+     * drawn with setVisualFire, since the real fire ticks a fireproof mob simply ignores.
+     */
+    private void burn(Summon summon) {
+        Mob mob = summon.mob;
+        Material inside = mob.getLocation().getBlock().getType();
+        Material under = mob.getLocation().subtract(0, 0.2, 0).getBlock().getType();
+        double damage = 0;
+        if (inside == Material.LAVA) {
+            damage = LAVA_DAMAGE;
+            summon.burning = BURN_SECONDS * 20;
+        } else if (inside == Material.FIRE || inside == Material.SOUL_FIRE
+                || HOT_FLOOR.contains(under)) {
+            damage = FIRE_DAMAGE;
+            summon.burning = BURN_SECONDS * 20;
+        } else if (summon.burning > 0) {
+            damage = FIRE_DAMAGE;
+        }
+        if (summon.burning > 0) {
+            summon.burning -= BURN_INTERVAL_TICKS;
+        }
+        mob.setVisualFire(summon.burning > 0);
+        if (damage > 0) {
+            mob.damage(damage);
+        }
+    }
+
+    /**
+     * Lightning does get through - it is not fire damage, whatever it looks like - but the fire
+     * it starts does not, so that part is lit here. 피뢰침 leaving a piglin untouched while the
+     * pig beside it burns would read as a bug.
+     */
+    @EventHandler(ignoreCancelled = true)
+    public void onLightning(EntityDamageEvent event) {
+        if (event.getCause() != EntityDamageEvent.DamageCause.LIGHTNING) {
+            return;
+        }
+        for (Summon summon : summons) {
+            if (summon.mob.equals(event.getEntity()) && FIREPROOF.contains(summon.kind)) {
+                summon.burning = BURN_SECONDS * 20;
+                return;
+            }
+        }
     }
 
     private void pursue(Summon summon) {
