@@ -21,6 +21,7 @@ import org.bukkit.entity.SmallFireball;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
@@ -85,6 +86,9 @@ public class SkillEffects implements Listener {
     private static final int PIG_COUNT = 10;
     private static final double PIG_SCATTER_SPEED = 0.7;
     private static final double PIG_SCATTER_LIFT = 0.45;
+    private static final int PIG_FUSE_TICKS = 3 * 20;
+    private static final double PIG_BLAST_DAMAGE = 6.0;
+    private static final double PIG_BLAST_RADIUS = 3.0;
 
     // ---------- 뇌격 ----------
     private static final double THUNDER_LEAP = 1.9;
@@ -153,6 +157,7 @@ public class SkillEffects implements Listener {
     private final SkillPreview preview;
     private final NamespacedKey waveShotKey;
     private final NamespacedKey boltKey;
+    private final NamespacedKey summonedPigKey;
     private final Random random = new Random();
     private final Map<UUID, Blink> blinks = new HashMap<>();
     private final Map<UUID, Leap> leaps = new HashMap<>();
@@ -173,6 +178,7 @@ public class SkillEffects implements Listener {
         this.preview = preview;
         this.waveShotKey = new NamespacedKey(plugin, "wave_shot");
         this.boltKey = new NamespacedKey(plugin, "bolt");
+        this.summonedPigKey = new NamespacedKey(plugin, "summoned_pig");
     }
 
     /** True when this cast is the second half of a two-step skill, which the caller uses to
@@ -997,12 +1003,49 @@ public class SkillEffects implements Listener {
             double angle = Math.PI * 2 * i / PIG_COUNT + random.nextDouble() * 0.3;
             double speed = PIG_SCATTER_SPEED * (0.8 + random.nextDouble() * 0.4);
             Pig pig = centre.getWorld().spawn(centre, Pig.class);
+            pig.getPersistentDataContainer().set(summonedPigKey, PersistentDataType.BOOLEAN, true);
+            pig.setPersistent(false);
             pig.setVelocity(new Vector(Math.cos(angle) * speed, PIG_SCATTER_LIFT, Math.sin(angle) * speed));
+            Bukkit.getScheduler().runTaskLater(plugin, () -> detonatePig(pig, player), PIG_FUSE_TICKS);
         }
         centre.getWorld().spawnParticle(Particle.EXPLOSION, centre.clone().add(0, 1, 0), 3, 0.3, 0.3, 0.3);
         centre.getWorld().playSound(centre, Sound.ENTITY_PIG_AMBIENT, 1.4f, 0.8f);
         centre.getWorld().playSound(centre, Sound.ENTITY_GENERIC_EXPLODE, 0.8f, 1.6f);
         return true;
+    }
+
+    /** Done by hand rather than with createExplosion: that would knock holes in the arena and
+     * would not know to spare the summoner. Other summoned pigs are spared too, or the first
+     * blast would set the rest off at once instead of letting each run its own fuse. */
+    private void detonatePig(Pig pig, Player caster) {
+        if (!pig.isValid()) {
+            return;
+        }
+        Location at = pig.getLocation();
+        pig.remove();
+        at.getWorld().spawnParticle(Particle.EXPLOSION, at.clone().add(0, 0.5, 0), 2, 0.2, 0.2, 0.2);
+        at.getWorld().playSound(at, Sound.ENTITY_GENERIC_EXPLODE, 1f, 1.3f);
+
+        for (Entity nearby : at.getWorld().getNearbyEntities(at, PIG_BLAST_RADIUS, PIG_BLAST_RADIUS, PIG_BLAST_RADIUS)) {
+            if (!(nearby instanceof LivingEntity victim) || victim.equals(caster) || isSummonedPig(nearby)) {
+                continue;
+            }
+            victim.damage(PIG_BLAST_DAMAGE, caster);
+        }
+    }
+
+    private boolean isSummonedPig(Entity entity) {
+        return Boolean.TRUE.equals(entity.getPersistentDataContainer()
+                .get(summonedPigKey, PersistentDataType.BOOLEAN));
+    }
+
+    /** Summoned pigs are ammunition, not livestock - killing one early yields nothing. */
+    @EventHandler(ignoreCancelled = true)
+    public void onSummonedPigDeath(EntityDeathEvent event) {
+        if (isSummonedPig(event.getEntity())) {
+            event.getDrops().clear();
+            event.setDroppedExp(0);
+        }
     }
 
     // ---------- not written yet ----------
