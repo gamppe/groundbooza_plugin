@@ -29,9 +29,11 @@ import org.bukkit.event.player.PlayerToggleSneakEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.LeatherArmorMeta;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.potion.PotionEffectTypeCategory;
 
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -151,23 +153,22 @@ public class QuestListener implements Listener {
     }
 
     /**
-     * Taking a debuff on purpose. Watching the effect land rather than the item covers a drink,
-     * a splash caught on oneself and food that bites back (거미 눈, 복어, 썩은 살점) with one
-     * rule - and the arena has no brewing stand without a nether, so food is the realistic way
-     * anyone does this.
+     * A harmful effect landing on the player, however it got there - drunk, eaten, splashed or
+     * bitten on. Watching the effect rather than the source is what lets 독 효과 얻기 be one
+     * rule covering a spider eye, a pufferfish and a cave spider alike; the arena has no brewing
+     * stand without a nether, so an actual potion is the least likely of the three.
+     *
+     * <p>Only harmful ones are reported, so a quest that names no effect still cannot be
+     * finished by drinking something good.
      */
     @EventHandler(ignoreCancelled = true)
     public void onDebuff(EntityPotionEffectEvent event) {
         if (!(event.getEntity() instanceof Player player) || event.getNewEffect() == null) {
             return;
         }
-        boolean selfInflicted = switch (event.getCause()) {
-            case POTION_DRINK, POTION_SPLASH, FOOD -> true;
-            default -> false;
-        };
-        if (selfInflicted
-                && event.getNewEffect().getType().getCategory() == PotionEffectTypeCategory.HARMFUL) {
-            tracker.fire(player, Quest.Goal.DEBUFF, null);
+        PotionEffectType type = event.getNewEffect().getType();
+        if (type.getCategory() == PotionEffectTypeCategory.HARMFUL) {
+            tracker.fire(player, Quest.Goal.DEBUFF, type.getKey().getKey().toUpperCase(Locale.ROOT));
         }
     }
 
