@@ -269,6 +269,18 @@ public class SkillEffects implements Listener {
         return isAdvancement(player, "electromancer");
     }
 
+    /**
+     * Every point of damage a skill deals goes through here.
+     *
+     * <p>Attribution is already right - {@code damage(amount, caster)} makes the caster the
+     * killer and wakes the target's own aggro, exactly as an arrow would. What it does not do
+     * is set the pack on them, so that is done explicitly.
+     */
+    private void hurt(Player caster, LivingEntity victim, double amount) {
+        victim.damage(amount, caster);
+        summons.rally(caster, victim);
+    }
+
     private boolean isNecromancer(Player player) {
         return isAdvancement(player, "necromancer");
     }
@@ -329,7 +341,7 @@ public class SkillEffects implements Listener {
         if (hit instanceof LivingEntity target && !target.equals(shooter)) {
             event.setCancelled(true);
             projectile.remove();
-            target.damage(monk ? WAVE_SHOT_MONK_DAMAGE : WAVE_SHOT_DAMAGE, shooter);
+            hurt(shooter, target, monk ? WAVE_SHOT_MONK_DAMAGE : WAVE_SHOT_DAMAGE);
             Vector push = target.getLocation().toVector().subtract(shooter.getLocation().toVector());
             if (push.lengthSquared() < 1.0E-4) {
                 push = shooter.getEyeLocation().getDirection();
@@ -407,7 +419,7 @@ public class SkillEffects implements Listener {
 
         for (Entity nearby : player.getNearbyEntities(BLINK_RADIUS, BLINK_RADIUS, BLINK_RADIUS)) {
             if (nearby instanceof LivingEntity victim && !victim.equals(player)) {
-                victim.damage(BLINK_DAMAGE, player);
+                hurt(player, victim, BLINK_DAMAGE);
             }
         }
         target.getWorld().spawnParticle(Particle.SWEEP_ATTACK, target.clone().add(0, 1, 0), 8, 1.0, 0.5, 1.0);
@@ -546,7 +558,7 @@ public class SkillEffects implements Listener {
 
         for (Entity nearby : player.getNearbyEntities(THUNDER_LAND_RADIUS, THUNDER_LAND_RADIUS, THUNDER_LAND_RADIUS)) {
             if (nearby instanceof LivingEntity victim && !victim.equals(player)) {
-                victim.damage(THUNDER_LAND_DAMAGE, player);
+                hurt(player, victim, THUNDER_LAND_DAMAGE);
                 victim.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, THUNDER_SLOW_TICKS, 1));
                 victim.getWorld().strikeLightningEffect(victim.getLocation());
             }
@@ -609,7 +621,7 @@ public class SkillEffects implements Listener {
                 Material.ICE.createBlockData());
         Entity sealed = Bukkit.getEntity(targetId);
         if (sealed instanceof LivingEntity alive && alive.isValid()) {
-            alive.damage(ICE_PRISON_DAMAGE, caster);
+            hurt(caster, alive, ICE_PRISON_DAMAGE);
             frost.clearFrostbite(alive);
         }
     }
@@ -704,7 +716,7 @@ public class SkillEffects implements Listener {
                                 || !alreadyHit.add(victim.getUniqueId())) {
                             continue;
                         }
-                        victim.damage(ICE_SPIKE_DAMAGE, caster);
+                        hurt(caster, victim, ICE_SPIKE_DAMAGE);
                         frost.applyFrostbite(victim, FROSTBITE_SECONDS);
                     }
                 }
@@ -912,7 +924,7 @@ public class SkillEffects implements Listener {
                     eye.toVector(), direction, range) == null) {
                 continue;
             }
-            victim.damage(BOLT_BEAM_DAMAGE, player);
+            hurt(player, victim, BOLT_BEAM_DAMAGE);
             root(victim);
             addShock(victim);
         }
@@ -1021,7 +1033,7 @@ public class SkillEffects implements Listener {
         Entity hit = event.getHitEntity();
         boolean rod = firedBy.equals("lightning_rod");
         if (hit instanceof LivingEntity target && !target.equals(shooter)) {
-            target.damage(rod ? ROD_BOLT_DAMAGE : BOLT_DAMAGE, shooter);
+            hurt(shooter, target, rod ? ROD_BOLT_DAMAGE : BOLT_DAMAGE);
             target.getWorld().spawnParticle(Particle.ELECTRIC_SPARK, target.getLocation().add(0, 1, 0),
                     20, 0.3, 0.4, 0.3, 0.1);
             if (rod) {
@@ -1149,7 +1161,7 @@ public class SkillEffects implements Listener {
         at.getWorld().playSound(at, Sound.ENTITY_GENERIC_EXPLODE, 1.2f, 0.9f);
         for (Entity nearby : at.getWorld().getNearbyEntities(at, PIG_BLAST_RADIUS, PIG_BLAST_RADIUS, PIG_BLAST_RADIUS)) {
             if (nearby instanceof LivingEntity victim && !victim.equals(caster) && !summons.isSummon(nearby)) {
-                victim.damage(PIGLIN_BLAST_DAMAGE, caster);
+                hurt(caster, victim, PIGLIN_BLAST_DAMAGE);
             }
         }
     }
@@ -1236,7 +1248,7 @@ public class SkillEffects implements Listener {
             if (!(nearby instanceof LivingEntity victim) || victim.equals(caster) || isSummonedPig(nearby)) {
                 continue;
             }
-            victim.damage(PIG_BLAST_DAMAGE, caster);
+            hurt(caster, victim, PIG_BLAST_DAMAGE);
         }
     }
 

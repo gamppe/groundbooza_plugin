@@ -101,6 +101,24 @@ public class Summons {
         summonIds.remove(mob.getUniqueId());
     }
 
+    /**
+     * Points everything this caster has out at whatever they just hurt.
+     *
+     * <p>Vanilla only does this for melee: a tame wolf's "help the owner" goal reads the last
+     * mob its owner <em>struck</em>, which a spell never sets. So a summoner whose magic is all
+     * at range would otherwise watch their pack stand around.
+     */
+    public void rally(Player caster, LivingEntity victim) {
+        if (victim.equals(caster) || isSummon(victim)) {
+            return;
+        }
+        for (Summon summon : summons) {
+            if (summon.casterId.equals(caster.getUniqueId()) && summon.mob.isValid()) {
+                summon.mob.setTarget(victim);
+            }
+        }
+    }
+
     public void boostSpeed(Player caster, int ticks, int amplifier) {
         allOf(caster).forEach(mob ->
                 mob.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, ticks, amplifier)));
