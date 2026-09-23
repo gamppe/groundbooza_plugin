@@ -1086,10 +1086,15 @@ public class SkillEffects implements Listener {
             Wolf wolf = centre.getWorld().spawn(centre, Wolf.class);
             wolf.setTamed(true);
             wolf.setOwner(player);
+            // Thrown outwards like the pigs, so a summon reads as a burst rather than a huddle.
+            double angle = Math.PI * 2 * i / WOLF_PACK_SIZE + random.nextDouble() * 0.3;
+            double speed = PIG_SCATTER_SPEED * (0.8 + random.nextDouble() * 0.4);
+            wolf.setVelocity(new Vector(Math.cos(angle) * speed, PIG_SCATTER_LIFT, Math.sin(angle) * speed));
             summons.add(wolf, player, Summons.Kind.WOLF_PET, Summons.Chase.NONE,
                     Summons.Prey.PLAYERS_AND_MOBS, Integer.MAX_VALUE / 100, mob -> { });
             pack.add(wolf);
         }
+        centre.getWorld().spawnParticle(Particle.POOF, centre.clone().add(0, 1, 0), 20, 0.4, 0.3, 0.4, 0.02);
         centre.getWorld().playSound(centre, Sound.ENTITY_WOLF_ANGRY_AMBIENT, 1.2f, 1f);
 
         // Keeping two is group business, not something each wolf can decide for itself.
