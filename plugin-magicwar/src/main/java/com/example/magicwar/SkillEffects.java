@@ -3,6 +3,7 @@ package com.example.magicwar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
+import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -25,11 +26,15 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
@@ -88,10 +93,25 @@ public class SkillEffects implements Listener {
     private static final int ICE_SPIKE_DIRECTIONS = 8;
     private static final int ICE_SPIKE_RANGE = 20;
     private static final int ICE_SPIKE_STEP_TICKS = 2;
+    /** Blocks either side of the centre line: 1 makes each arm three wide. */
+    private static final int ICE_SPIKE_HALF_WIDTH = 1;
     private static final double ICE_SPIKE_DAMAGE = 8.0;
     private static final int ICE_SPIKE_LINGER_TICKS = 6 * 20;
     /** Half-width of the sheet of ice the cast lays down underfoot: 2 gives 5x5. */
     private static final int ICE_SPIKE_BASE_RADIUS = 2;
+
+    // ---------- 파이로맨서 ----------
+    /** Small enough to singe rather than crater - block damage is off regardless. */
+    private static final float BOLT_BLAST_POWER = 1.2f;
+    private static final int ERUPTION_RANGE = 24;
+    /** 7x7 masked to a circle. */
+    private static final int ERUPTION_RADIUS = 3;
+    private static final int ERUPTION_MAGMA_TICKS = 8 * 20;
+    private static final int ERUPTION_DELAY_TICKS = 30; // 1.5s between the magma and the lava
+    private static final int ERUPTION_HEIGHT = 20;
+    private static final int ERUPTION_STEP_TICKS = 2;
+    /** Each lava block is only there for a moment, so the column reads as a spout. */
+    private static final int ERUPTION_LAVA_TICKS = 20;
 
     private static final int DUST_RING_POINTS = 16;
     private static final double DUST_RING_RADIUS = 2.2;
@@ -109,6 +129,8 @@ public class SkillEffects implements Listener {
     private final ClassManager classes;
     private final SkillCooldowns cooldowns;
     private final FrostState frost;
+    private final TempBlocks tempBlocks;
+    private final SkillItem skillItems;
     private final NamespacedKey waveShotKey;
     private final NamespacedKey boltKey;
     private final Random random = new Random();
@@ -118,11 +140,13 @@ public class SkillEffects implements Listener {
     private final Set<UUID> noFall = new HashSet<>();
 
     public SkillEffects(MagicWarPlugin plugin, ClassManager classes, SkillCooldowns cooldowns,
-                        FrostState frost) {
+                        FrostState frost, TempBlocks tempBlocks, SkillItem skillItems) {
         this.plugin = plugin;
         this.classes = classes;
         this.cooldowns = cooldowns;
         this.frost = frost;
+        this.tempBlocks = tempBlocks;
+        this.skillItems = skillItems;
         this.waveShotKey = new NamespacedKey(plugin, "wave_shot");
         this.boltKey = new NamespacedKey(plugin, "bolt");
     }
@@ -146,6 +170,7 @@ public class SkillEffects implements Listener {
             case "pig_burst" -> pigBurst(player);
             case "thunder_strike" -> thunderStrike(player);
             case "ice_spike" -> iceSpike(player);
+            case "lava_eruption" -> lavaEruption(player);
             default -> placeholder(player, skill);
         };
     }
@@ -174,6 +199,10 @@ public class SkillEffects implements Listener {
 
     private boolean isFrostKnight(Player player) {
         return isAdvancement(player, "frost_knight");
+    }
+
+    private boolean isPyromancer(Player player) {
+        return isAdvancement(player, "pyromancer");
     }
 
     private boolean isAdvancement(Player player, String id) {
@@ -372,6 +401,7 @@ public class SkillEffects implements Listener {
     /** Called every tick from the plugin: watches for a dashing player touching down. */
     public void tick() {
         expireBlinks();
+        tickEruptionPreview();
         Iterator<Map.Entry<UUID, Leap>> it = leaps.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<UUID, Leap> entry = it.next();
@@ -548,29 +578,162 @@ public class SkillEffects implements Listener {
                     cancel();
                     return;
                 }
-                int x = origin.getBlockX() + (int) Math.round(dx * step);
-                int z = origin.getBlockZ() + (int) Math.round(dz * step);
-                Block surface = frost.surfaceAt(origin, x, z, lastY);
+                int centreX = origin.getBlockX() + (int) Math.round(dx * step);
+                int centreZ = origin.getBlockZ() + (int) Math.round(dz * step);
                 step++;
-                if (surface == null) {
-                    return; // a cliff or an overhang - skip this block, keep crawling
-                }
-                lastY = surface.getY();
-                frost.placeTemporary(surface, Material.PACKED_ICE, ICE_SPIKE_LINGER_TICKS);
-                surface.getWorld().spawnParticle(Particle.SNOWFLAKE,
-                        surface.getLocation().add(0.5, 1, 0.5), 8, 0.2, 0.4, 0.2, 0.01);
-
-                for (Entity nearby : surface.getWorld().getNearbyEntities(
-                        surface.getLocation().add(0.5, 1, 0.5), 0.8, 1.2, 0.8)) {
-                    if (!(nearby instanceof LivingEntity victim) || victim.equals(caster)
-                            || !alreadyHit.add(victim.getUniqueId())) {
-                        continue;
+                // Perpendicular to the arm, so the widening is across it rather than along it.
+                double perpX = -dz;
+                double perpZ = dx;
+                boolean placedAny = false;
+                for (int off = -ICE_SPIKE_HALF_WIDTH; off <= ICE_SPIKE_HALF_WIDTH; off++) {
+                    int x = centreX + (int) Math.round(perpX * off);
+                    int z = centreZ + (int) Math.round(perpZ * off);
+                    Block surface = frost.surfaceAt(origin, x, z, lastY);
+                    if (surface == null) {
+                        continue; // a cliff or an overhang - skip this block, keep crawling
                     }
-                    victim.damage(ICE_SPIKE_DAMAGE, caster);
-                    frost.applyFrostbite(victim, FROSTBITE_SECONDS);
+                    if (off == 0) {
+                        lastY = surface.getY(); // the centre line is what the arm follows
+                    }
+                    placedAny = true;
+                    frost.placeTemporary(surface, Material.PACKED_ICE, ICE_SPIKE_LINGER_TICKS);
+                    surface.getWorld().spawnParticle(Particle.SNOWFLAKE,
+                            surface.getLocation().add(0.5, 1, 0.5), 6, 0.2, 0.4, 0.2, 0.01);
+
+                    for (Entity nearby : surface.getWorld().getNearbyEntities(
+                            surface.getLocation().add(0.5, 1, 0.5), 0.8, 1.2, 0.8)) {
+                        if (!(nearby instanceof LivingEntity victim) || victim.equals(caster)
+                                || !alreadyHit.add(victim.getUniqueId())) {
+                            continue;
+                        }
+                        victim.damage(ICE_SPIKE_DAMAGE, caster);
+                        frost.applyFrostbite(victim, FROSTBITE_SECONDS);
+                    }
+                }
+                if (!placedAny) {
+                    return;
                 }
             }
         }.runTaskTimer(plugin, 0L, ICE_SPIKE_STEP_TICKS);
+    }
+
+    // ---------- 파이로맨서 : 불에 데지 않는 몸 ----------
+
+    /** The passive. Anything hot simply does not apply - fire, lava, and the magma block the
+     * eruption stands on. */
+    @EventHandler(ignoreCancelled = true)
+    public void onBurn(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player player) || !isPyromancer(player)) {
+            return;
+        }
+        switch (event.getCause()) {
+            case FIRE, FIRE_TICK, LAVA, HOT_FLOOR -> {
+                event.setCancelled(true);
+                player.setFireTicks(0);
+            }
+            default -> { }
+        }
+    }
+
+    // ---------- 파이로맨서 2 : 용암분출 ----------
+
+    /** The ground the caster is looking at, or null when they are aiming at the sky. */
+    private Block eruptionTarget(Player player) {
+        RayTraceResult hit = player.rayTraceBlocks(ERUPTION_RANGE, FluidCollisionMode.NEVER);
+        return hit == null ? null : hit.getHitBlock();
+    }
+
+    /** The 7x7 circle centred on a block, following the surface so a slope is covered too. */
+    private List<Block> eruptionArea(Block centre) {
+        List<Block> area = new ArrayList<>();
+        for (int dx = -ERUPTION_RADIUS; dx <= ERUPTION_RADIUS; dx++) {
+            for (int dz = -ERUPTION_RADIUS; dz <= ERUPTION_RADIUS; dz++) {
+                if (dx * dx + dz * dz > (ERUPTION_RADIUS + 0.5) * (ERUPTION_RADIUS + 0.5)) {
+                    continue; // round the square off
+                }
+                Block above = frost.surfaceAt(centre.getLocation(), centre.getX() + dx, centre.getZ() + dz,
+                        centre.getY() + 1);
+                if (above != null) {
+                    area.add(above.getRelative(0, -1, 0)); // the solid block, not the air over it
+                }
+            }
+        }
+        return area;
+    }
+
+    /** Called every tick: shows the caster where the eruption would land. Sent to that player
+     * alone, so nobody else reads the telegraph. */
+    private void tickEruptionPreview() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            String heldId = skillItems.skillIdOf(player.getInventory().getItemInMainHand());
+            if (!"lava_eruption".equals(heldId)
+                    || classes.skillById(player.getUniqueId(), heldId) == null) {
+                continue; // not holding it, or holding one they no longer own
+            }
+            Block target = eruptionTarget(player);
+            if (target == null) {
+                continue;
+            }
+            for (Block block : eruptionArea(target)) {
+                player.spawnParticle(Particle.LAVA, block.getLocation().add(0.5, 1.1, 0.5), 1, 0.2, 0.0, 0.2, 0.0);
+            }
+        }
+    }
+
+    private boolean lavaEruption(Player player) {
+        Block target = eruptionTarget(player);
+        if (target == null) {
+            player.sendActionBar(Component.text("땅을 바라보고 시전하세요.", NamedTextColor.RED));
+            return false;
+        }
+        List<Block> area = eruptionArea(target);
+        if (area.isEmpty()) {
+            player.sendActionBar(Component.text("땅을 바라보고 시전하세요.", NamedTextColor.RED));
+            return false;
+        }
+        // Centre outwards, so the eruption reads as spreading from where it was aimed.
+        Location centre = target.getLocation();
+        area.sort(Comparator.comparingDouble(block -> block.getLocation().distanceSquared(centre)));
+        area.forEach(block -> tempBlocks.place(block, Material.MAGMA_BLOCK, ERUPTION_MAGMA_TICKS));
+        player.getWorld().playSound(centre, Sound.BLOCK_LAVA_POP, 1.4f, 0.6f);
+
+        Bukkit.getScheduler().runTaskLater(plugin, () -> erupt(area, centre), ERUPTION_DELAY_TICKS);
+        return true;
+    }
+
+    /** One task drives every column: each block starts a tick behind the one nearer the centre,
+     * and every column climbs at the same rate. Running a task per column would be dozens of
+     * timers doing the same arithmetic. */
+    private void erupt(List<Block> area, Location centre) {
+        centre.getWorld().playSound(centre, Sound.ENTITY_GENERIC_EXPLODE, 1.2f, 0.5f);
+        new BukkitRunnable() {
+            int step = 0;
+
+            @Override
+            public void run() {
+                boolean anyLeft = false;
+                for (int i = 0; i < area.size(); i++) {
+                    int height = step - i; // the delay that makes it spread outwards
+                    if (height < 0) {
+                        anyLeft = true;
+                        continue;
+                    }
+                    if (height >= ERUPTION_HEIGHT) {
+                        continue;
+                    }
+                    anyLeft = true;
+                    Block base = area.get(i);
+                    Block lava = base.getRelative(0, height + 1, 0);
+                    if (lava.getType().isAir()) {
+                        tempBlocks.place(lava, Material.LAVA, ERUPTION_LAVA_TICKS);
+                    }
+                }
+                step++;
+                if (!anyLeft) {
+                    cancel();
+                }
+            }
+        }.runTaskTimer(plugin, 0L, ERUPTION_STEP_TICKS);
     }
 
     // ---------- 소서러 1 : 볼트마법 ----------
@@ -606,6 +769,11 @@ public class SkillEffects implements Listener {
             target.damage(BOLT_DAMAGE, shooter);
             target.getWorld().spawnParticle(Particle.ELECTRIC_SPARK, target.getLocation().add(0, 1, 0),
                     20, 0.3, 0.4, 0.3, 0.1);
+        }
+        if (isPyromancer(shooter)) {
+            // Fires are set, blocks are not broken: the arena should scorch, not crater.
+            projectile.getWorld().createExplosion(projectile.getLocation(), BOLT_BLAST_POWER, true, false, shooter);
+            return;
         }
         projectile.getWorld().playSound(projectile.getLocation(), Sound.ENTITY_ZOMBIE_VILLAGER_CURE, 1f, 2f);
     }

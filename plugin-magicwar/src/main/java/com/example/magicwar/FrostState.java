@@ -3,20 +3,15 @@ package com.example.magicwar;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.Particle;
-import org.bukkit.Sound;
 import org.bukkit.block.Block;
-import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -35,18 +30,16 @@ public class FrostState implements Listener {
      * exactly what onFreezeDamage stops. */
     private static final int FREEZE_TICKS = 160;
 
-    private record TempBlock(Block block, BlockData original, long restoreAtMillis) {}
-
     private final MagicWarPlugin plugin;
     /** Entity id to when the frostbite lapses. */
     private final Map<UUID, Long> frostbitten = new HashMap<>();
     /** Entity id to when it may cast again. */
     private final Map<UUID, Long> silenced = new HashMap<>();
-    private final List<TempBlock> tempBlocks = new ArrayList<>();
-    private final java.util.Random random = new java.util.Random();
+    private final TempBlocks tempBlocks;
 
-    public FrostState(MagicWarPlugin plugin) {
+    public FrostState(MagicWarPlugin plugin, TempBlocks tempBlocks) {
         this.plugin = plugin;
+        this.tempBlocks = tempBlocks;
     }
 
     // ---------- 동상 ----------
@@ -95,14 +88,8 @@ public class FrostState implements Listener {
 
     // ---------- 임시 얼음 ----------
 
-    /** Turns a block to ice and schedules it back. Blocks that are already ours are left alone
-     * so an overlapping cast cannot bake the ice in permanently. */
     public void placeTemporary(Block block, Material material, int ticks) {
-        if (block.getType() == material) {
-            return;
-        }
-        tempBlocks.add(new TempBlock(block, block.getBlockData(), System.currentTimeMillis() + ticks * 50L));
-        block.setType(material, false);
+        tempBlocks.place(block, material, ticks);
     }
 
     /** Called every tick from the plugin. */
@@ -126,31 +113,10 @@ public class FrostState implements Listener {
 
         silenced.entrySet().removeIf(entry -> entry.getValue() <= now);
 
-        Iterator<TempBlock> blocks = tempBlocks.iterator();
-        while (blocks.hasNext()) {
-            TempBlock temp = blocks.next();
-            if (temp.restoreAtMillis() > now) {
-                continue;
-            }
-            blocks.remove();
-            Material was = temp.block().getType();
-            temp.block().setBlockData(temp.original(), false);
-            temp.block().getWorld().spawnParticle(Particle.BLOCK,
-                    temp.block().getLocation().add(0.5, 0.5, 0.5), 12, 0.3, 0.3, 0.3, 0.0,
-                    was.createBlockData());
-            // A cast lays down well over a hundred blocks; every one of them cracking at once
-            // would be a wall of noise, so only a scattering of them is heard.
-            if (random.nextInt(8) == 0) {
-                temp.block().getWorld().playSound(temp.block().getLocation(),
-                        Sound.BLOCK_GLASS_BREAK, 0.6f, 1.2f);
-            }
-        }
     }
 
-    /** Puts every borrowed block back at once - used when a round ends under the ice. */
+    /** The blocks are TempBlocks' problem; this drops the statuses. */
     public void clear() {
-        tempBlocks.forEach(temp -> temp.block().setBlockData(temp.original(), false));
-        tempBlocks.clear();
         frostbitten.keySet().forEach(id -> {
             Entity entity = Bukkit.getEntity(id);
             if (entity != null) {

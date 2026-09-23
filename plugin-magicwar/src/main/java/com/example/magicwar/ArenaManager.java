@@ -459,6 +459,7 @@ public class ArenaManager {
         plugin.getSkillCooldowns().clear();
         plugin.getSkillEffects().clear();
         plugin.getFrostState().clear();
+        plugin.getTempBlocks().clear();
         for (Player player : Bukkit.getOnlinePlayers()) {
             player.setInvulnerable(false);
             if (!isLobby(player.getWorld())) {
