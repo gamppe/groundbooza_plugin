@@ -19,6 +19,7 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.entity.EntityPotionEffectEvent;
 import org.bukkit.event.entity.EntityRegainHealthEvent;
 import org.bukkit.event.entity.EntityTameEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
@@ -28,6 +29,7 @@ import org.bukkit.event.player.PlayerToggleSneakEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.LeatherArmorMeta;
+import org.bukkit.potion.PotionEffectTypeCategory;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -146,6 +148,27 @@ public class QuestListener implements Listener {
     @EventHandler(ignoreCancelled = true)
     public void onEat(PlayerItemConsumeEvent event) {
         tracker.fire(event.getPlayer(), Quest.Goal.EAT, event.getItem().getType().name());
+    }
+
+    /**
+     * Taking a debuff on purpose. Watching the effect land rather than the item covers a drink,
+     * a splash caught on oneself and food that bites back (거미 눈, 복어, 썩은 살점) with one
+     * rule - and the arena has no brewing stand without a nether, so food is the realistic way
+     * anyone does this.
+     */
+    @EventHandler(ignoreCancelled = true)
+    public void onDebuff(EntityPotionEffectEvent event) {
+        if (!(event.getEntity() instanceof Player player) || event.getNewEffect() == null) {
+            return;
+        }
+        boolean selfInflicted = switch (event.getCause()) {
+            case POTION_DRINK, POTION_SPLASH, FOOD -> true;
+            default -> false;
+        };
+        if (selfInflicted
+                && event.getNewEffect().getType().getCategory() == PotionEffectTypeCategory.HARMFUL) {
+            tracker.fire(player, Quest.Goal.DEBUFF, null);
+        }
     }
 
     // ---------- what is being worn ----------

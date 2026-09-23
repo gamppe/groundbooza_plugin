@@ -72,6 +72,8 @@ public record Quest(String id, String tag, NamedTextColor color, String title, i
         public static final String BOLT_SNIPER = "bolt_sniper";
         /** A player found by 흔적 추적. */
         public static final String TRACK_FIND = "track_find";
+        /** Taking a harmful effect on purpose, by drinking or eating something. */
+        public static final String DEBUFF = "debuff";
 
         /** A slot that has no quest in it yet. Never advances, never pays out. */
         public static final String NONE = "none";
