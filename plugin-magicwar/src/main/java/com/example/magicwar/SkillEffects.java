@@ -66,7 +66,20 @@ public class SkillEffects implements Listener {
 
     // ---------- 볼트마법 ----------
     private static final double BOLT_DAMAGE = 5.0;
-    private static final double BOLT_SPEED = 1.9;
+    private static final double BOLT_SPEED = 1.5;
+
+    // ---------- 일렉트로맨서 ----------
+    private static final double BOLT_BEAM_DAMAGE = 2.0;
+    private static final int BOLT_BEAM_RANGE = 30;
+    /** Widens the beam a little so a shot that looks like a hit is one. */
+    private static final double BOLT_BEAM_FORGIVENESS = 0.25;
+    private static final int ROOT_TICKS = 4; // 0.2s
+    private static final int SHOCK_SECONDS = 5;
+    private static final int SHOCK_MAX_STACKS = 3;
+    private static final int ROD_DELAY_TICKS = 12; // 0.6s
+    private static final int ROD_REPEAT_TICKS = 6;
+    /** Vanilla lightning deals 5, under the 8 that would have made it worth faking. */
+    private static final double ROD_BOLT_DAMAGE = 2.0;
 
     // ---------- 돼지 소환 ----------
     private static final int PIG_COUNT = 10;
@@ -125,6 +138,8 @@ public class SkillEffects implements Listener {
      * for the case where it dies or despawns before the follow-up. */
     private record Blink(UUID targetId, Location lastKnown, long expiresAtMillis) {}
 
+    private record Shock(int stacks, long expiresAtMillis) {}
+
     /** {@code leftGround} matters: velocity is applied a tick before the player actually rises,
      * so without it the very next tick sees them still standing and cancels the whole skill. */
     private record Leap(boolean dashed, boolean leftGround, long startedAtMillis) {}
@@ -141,6 +156,8 @@ public class SkillEffects implements Listener {
     private final Random random = new Random();
     private final Map<UUID, Blink> blinks = new HashMap<>();
     private final Map<UUID, Leap> leaps = new HashMap<>();
+    /** Entity id to its 감전 stacks and when they lapse. */
+    private final Map<UUID, Shock> shocks = new HashMap<>();
     /** Players mid-뇌격, exempt from fall damage until shortly after they touch down. */
     private final Set<UUID> noFall = new HashSet<>();
 
@@ -178,6 +195,7 @@ public class SkillEffects implements Listener {
             case "thunder_strike" -> thunderStrike(player);
             case "ice_spike" -> iceSpike(player);
             case "lava_eruption" -> lavaEruption(player);
+            case "lightning_rod" -> lightningRod(player);
             default -> placeholder(player, skill);
         };
     }
@@ -210,6 +228,10 @@ public class SkillEffects implements Listener {
 
     private boolean isPyromancer(Player player) {
         return isAdvancement(player, "pyromancer");
+    }
+
+    private boolean isElectromancer(Player player) {
+        return isAdvancement(player, "electromancer");
     }
 
     private boolean isAdvancement(Player player, String id) {
@@ -408,6 +430,7 @@ public class SkillEffects implements Listener {
     /** Called every tick from the plugin: watches for a dashing player touching down. */
     public void tick() {
         expireBlinks();
+        tickShocks();
         tickPreview();
         Iterator<Map.Entry<UUID, Leap>> it = leaps.entrySet().iterator();
         while (it.hasNext()) {
@@ -802,21 +825,137 @@ public class SkillEffects implements Listener {
     /** A small fireball stripped of everything that makes it a fireball: no block damage, no
      * fires started. It is here for the flame trail - the bolt's damage is applied by hand. */
     private boolean bolt(Player player) {
+        if (isElectromancer(player)) {
+            return boltBeam(player);
+        }
+        launchBolt(player, "bolt");
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_BLAZE_SHOOT, 1f, 1.6f);
+        return true;
+    }
+
+    /** @param skillId written onto the projectile, so the hit handler knows which skill to run. */
+    private void launchBolt(Player player, String skillId) {
         Vector direction = player.getEyeLocation().getDirection().normalize().multiply(BOLT_SPEED);
         player.launchProjectile(SmallFireball.class, direction, bolt -> {
             bolt.setIsIncendiary(false);
             bolt.setYield(0f);
-            bolt.getPersistentDataContainer().set(boltKey, PersistentDataType.BOOLEAN, true);
+            bolt.getPersistentDataContainer().set(boltKey, PersistentDataType.STRING, skillId);
         });
-        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_BLAZE_SHOOT, 1f, 1.6f);
+    }
+
+    // ---------- 일렉트로맨서 1 : 볼트마법 (히트스캔) ----------
+
+    /** No projectile at all: the line is traced once, stopped at the first wall, and everything
+     * standing along it is hit at once. Piercing is why the entities are gathered by hand
+     * rather than taking rayTrace's first result. */
+    private boolean boltBeam(Player player) {
+        Location eye = player.getEyeLocation();
+        Vector direction = eye.getDirection().normalize();
+        RayTraceResult wall = player.getWorld().rayTraceBlocks(eye, direction, BOLT_BEAM_RANGE,
+                FluidCollisionMode.NEVER, true);
+        double range = wall == null ? BOLT_BEAM_RANGE : eye.toVector().distance(wall.getHitPosition());
+
+        for (double along = 0.5; along < range; along += 0.4) {
+            Location point = eye.clone().add(direction.clone().multiply(along));
+            player.getWorld().spawnParticle(Particle.ELECTRIC_SPARK, point, 1, 0.02, 0.02, 0.02, 0.0);
+        }
+        player.getWorld().playSound(eye, Sound.ENTITY_BREEZE_SHOOT, 1f, 2f);
+
+        for (Entity nearby : player.getWorld().getNearbyEntities(eye, range, range, range)) {
+            if (!(nearby instanceof LivingEntity victim) || victim.equals(player)) {
+                continue;
+            }
+            if (victim.getBoundingBox().expand(BOLT_BEAM_FORGIVENESS).rayTrace(
+                    eye.toVector(), direction, range) == null) {
+                continue;
+            }
+            victim.damage(BOLT_BEAM_DAMAGE, player);
+            root(victim);
+            addShock(victim);
+        }
         return true;
+    }
+
+    /** Pinned for a fraction of a second. Slowness alone does not stop a player, so the
+     * velocity is held at zero for the duration as well. */
+    private void root(LivingEntity victim) {
+        victim.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, ROOT_TICKS, 10));
+        new BukkitRunnable() {
+            int left = ROOT_TICKS;
+
+            @Override
+            public void run() {
+                if (left-- <= 0 || !victim.isValid()) {
+                    cancel();
+                    return;
+                }
+                victim.setVelocity(new Vector(0, victim.isOnGround() ? 0 : -0.08, 0));
+            }
+        }.runTaskTimer(plugin, 1L, 1L);
+    }
+
+    // ---------- 감전 ----------
+
+    private void addShock(LivingEntity victim) {
+        Shock current = shocks.get(victim.getUniqueId());
+        int stacks = current == null || current.expiresAtMillis() <= System.currentTimeMillis()
+                ? 1 : Math.min(SHOCK_MAX_STACKS, current.stacks() + 1);
+        shocks.put(victim.getUniqueId(), new Shock(stacks, System.currentTimeMillis() + SHOCK_SECONDS * 1000L));
+    }
+
+    private int shockStacks(Entity entity) {
+        Shock shock = shocks.get(entity.getUniqueId());
+        return shock == null || shock.expiresAtMillis() <= System.currentTimeMillis() ? 0 : shock.stacks();
+    }
+
+    /** Sparks over anything still carrying a charge, and drops the lapsed marks. */
+    private void tickShocks() {
+        long now = System.currentTimeMillis();
+        Iterator<Map.Entry<UUID, Shock>> it = shocks.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<UUID, Shock> entry = it.next();
+            Entity entity = Bukkit.getEntity(entry.getKey());
+            if (entity == null || !entity.isValid() || entry.getValue().expiresAtMillis() <= now) {
+                it.remove();
+                continue;
+            }
+            entity.getWorld().spawnParticle(Particle.ELECTRIC_SPARK, entity.getLocation().add(0, 1, 0),
+                    entry.getValue().stacks(), 0.3, 0.5, 0.3, 0.02);
+        }
+    }
+
+    // ---------- 일렉트로맨서 2 : 피뢰침 ----------
+
+    private boolean lightningRod(Player player) {
+        launchBolt(player, "lightning_rod");
+        player.getWorld().playSound(player.getLocation(), Sound.ITEM_TRIDENT_THROW, 1f, 1.4f);
+        return true;
+    }
+
+    /** One bolt per 감전 stack, a few ticks apart so they read as a volley rather than a single
+     * flash. Real lightning: vanilla deals 5, comfortably under the 8 that would have been
+     * worth faking - it does set the target alight and can charge a creeper, which is part of
+     * the deal. */
+    private void callLightning(Player caster, LivingEntity target, int strikes) {
+        new BukkitRunnable() {
+            int left = strikes;
+
+            @Override
+            public void run() {
+                if (left-- <= 0 || !target.isValid() || !caster.isOnline()) {
+                    cancel();
+                    return;
+                }
+                target.getWorld().strikeLightning(target.getLocation());
+            }
+        }.runTaskTimer(plugin, ROD_DELAY_TICKS, ROD_REPEAT_TICKS);
     }
 
     @EventHandler(ignoreCancelled = true)
     public void onBoltHit(ProjectileHitEvent event) {
         Projectile projectile = event.getEntity();
-        if (!Boolean.TRUE.equals(projectile.getPersistentDataContainer()
-                .get(boltKey, PersistentDataType.BOOLEAN))) {
+        String firedBy = projectile.getPersistentDataContainer().get(boltKey, PersistentDataType.STRING);
+        if (firedBy == null) {
             return;
         }
         // Cancelled either way: a fireball that touches a block would still scorch it.
@@ -826,10 +965,15 @@ public class SkillEffects implements Listener {
             return;
         }
         Entity hit = event.getHitEntity();
+        boolean rod = firedBy.equals("lightning_rod");
         if (hit instanceof LivingEntity target && !target.equals(shooter)) {
-            target.damage(BOLT_DAMAGE, shooter);
+            target.damage(rod ? ROD_BOLT_DAMAGE : BOLT_DAMAGE, shooter);
             target.getWorld().spawnParticle(Particle.ELECTRIC_SPARK, target.getLocation().add(0, 1, 0),
                     20, 0.3, 0.4, 0.3, 0.1);
+            if (rod) {
+                addShock(target);
+                callLightning(shooter, target, shockStacks(target));
+            }
         }
         if (isPyromancer(shooter)) {
             // Fires are set, blocks are not broken: the arena should scorch, not crater.
@@ -870,6 +1014,7 @@ public class SkillEffects implements Listener {
 
     public void clear() {
         blinks.clear();
+        shocks.clear();
         leaps.clear();
         noFall.clear();
         preview.clear();
