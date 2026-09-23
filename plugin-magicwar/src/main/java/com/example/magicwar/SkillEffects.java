@@ -3,6 +3,7 @@ package com.example.magicwar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
+import org.bukkit.Color;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -107,11 +108,15 @@ public class SkillEffects implements Listener {
     /** 7x7 masked to a circle. */
     private static final int ERUPTION_RADIUS = 3;
     private static final int ERUPTION_MAGMA_TICKS = 8 * 20;
-    private static final int ERUPTION_DELAY_TICKS = 30; // 1.5s between the magma and the lava
+    private static final int ERUPTION_DELAY_TICKS = 15; // 0.75s between the magma and the lava
     private static final int ERUPTION_HEIGHT = 20;
     private static final int ERUPTION_STEP_TICKS = 2;
     /** Each lava block is only there for a moment, so the column reads as a spout. */
     private static final int ERUPTION_LAVA_TICKS = 20;
+    /** A flat grid of small dots: LAVA particles jump and spit, which made the circle hard to
+     * read at a glance. */
+    private static final Particle.DustOptions ERUPTION_MARKER =
+            new Particle.DustOptions(Color.fromRGB(255, 90, 0), 0.9f);
 
     private static final int DUST_RING_POINTS = 16;
     private static final double DUST_RING_RADIUS = 2.2;
@@ -666,16 +671,21 @@ public class SkillEffects implements Listener {
     private void tickEruptionPreview() {
         for (Player player : Bukkit.getOnlinePlayers()) {
             String heldId = skillItems.skillIdOf(player.getInventory().getItemInMainHand());
-            if (!"lava_eruption".equals(heldId)
-                    || classes.skillById(player.getUniqueId(), heldId) == null) {
-                continue; // not holding it, or holding one they no longer own
+            if (!"lava_eruption".equals(heldId)) {
+                continue;
+            }
+            ClassSkill skill = classes.skillById(player.getUniqueId(), heldId);
+            // Nothing to aim at while it is recharging, so the marker would only be noise.
+            if (skill == null || !cooldowns.ready(player, skill)) {
+                continue;
             }
             Block target = eruptionTarget(player);
             if (target == null) {
                 continue;
             }
             for (Block block : eruptionArea(target)) {
-                player.spawnParticle(Particle.LAVA, block.getLocation().add(0.5, 1.1, 0.5), 1, 0.2, 0.0, 0.2, 0.0);
+                player.spawnParticle(Particle.DUST, block.getLocation().add(0.5, 1.05, 0.5),
+                        1, 0.0, 0.0, 0.0, 0.0, ERUPTION_MARKER);
             }
         }
     }
