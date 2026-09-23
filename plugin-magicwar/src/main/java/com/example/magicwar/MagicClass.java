@@ -16,7 +16,7 @@ import java.util.List;
  */
 public enum MagicClass {
 
-    BATTLE_MAGE("배틀메이지", Material.STONE_SWORD, "마법을 두른 근접 전사",
+    BATTLE_MAGE("배틀메이지", Material.STONE_SWORD, "마법을 두른 근접 전사", Reward.of(""),
             List.of(new ClassSkill("wave_shot", "파동탄", Material.SKULL_BANNER_PATTERN, 10)),
             List.of(
                     Quest.of("bm_sword", Quest.COMMON_TAG, NamedTextColor.WHITE,
@@ -79,11 +79,13 @@ public enum MagicClass {
                                     Material.SKULL_BANNER_PATTERN, 8))))),
 
     SORCERER("소서러", Material.FIRE_CHARGE, "원거리 주문으로 싸우는 마법사",
-            List.of(new ClassSkill("bolt", "볼트마법", Material.FLOW_BANNER_PATTERN, 6, 3)),
+            Reward.of("근접 공격 피해 -2", Perks.MELEE_PENALTY, 2),
+            List.of(new ClassSkill("bolt", "볼트마법", Material.FLOW_BANNER_PATTERN, 6, 2)),
             List.of(
                     Quest.of("sc_fire", Quest.COMMON_TAG, NamedTextColor.WHITE,
                             "불 5번 끄기", 5, Material.WATER_BUCKET,
-                            Quest.Goal.EXTINGUISH, Reward.of("주는 피해 +2", Perks.DAMAGE, 2)),
+                            Quest.Goal.EXTINGUISH,
+                            Reward.of("볼트마법 최대 스택 +1", Perks.CHARGES + "bolt", 1)),
                     Quest.of("sc_sign", Quest.COMMON_TAG, NamedTextColor.WHITE,
                             "표지판에 빛나는 먹물 바르기", 1, Material.GLOW_INK_SAC,
                             Quest.Goal.GLOW_SIGN,
@@ -101,7 +103,8 @@ public enum MagicClass {
                             List.of(
                                     Quest.of("py_obsidian", Quest.COMMON_TAG, NamedTextColor.WHITE,
                                             "흑요석 1개 채취", 1, Material.OBSIDIAN,
-                                            Quest.Goal.MINE, Reward.of("주는 피해 +4", Perks.DAMAGE, 4),
+                                            Quest.Goal.MINE,
+                                            Reward.of("마법 피해 +4", Perks.SPELL_DAMAGE, 4),
                                             "OBSIDIAN"),
                                     Quest.of("py_erupt", Quest.COMMON_TAG, NamedTextColor.WHITE,
                                             "용암분출 8회 시전", 8, Material.MAGMA_BLOCK,
@@ -113,7 +116,8 @@ public enum MagicClass {
                                             Quest.Goal.SKILL_DAMAGE,
                                             Reward.of("볼트마법이 3갈래로 발사", Perks.BOLT_SPLIT, 1),
                                             "bolt")),
-                            Reward.of("화염 피해 면역", Perks.FIRE_IMMUNE, 1)),
+                            Reward.of("화염 피해 면역, 마법 피해 +2",
+                                    Perks.FIRE_IMMUNE, 1, Perks.SPELL_DAMAGE, 2)),
                     new Advancement("electromancer", "일렉트로맨서", Material.LIGHTNING_ROD, NamedTextColor.YELLOW,
                             new ClassSkill("lightning_rod", "피뢰침", Material.FLOWER_BANNER_PATTERN, 15),
                             Quest.of("adv_electromancer", "일렉트로맨서", NamedTextColor.YELLOW,
@@ -133,11 +137,14 @@ public enum MagicClass {
                                             "1초 내로 40m 밖의 적에게 볼트마법 2회 적중", 2, Material.SPYGLASS,
                                             Quest.Goal.BOLT_SNIPER,
                                             Reward.of("볼트마법 최대 스택 +1", Perks.CHARGES + "bolt", 1))),
-                            Reward.of("최대체력 +2", Perks.HEALTH, 2),
+                            Reward.of("최대체력 +2, 이동속도 10% 증가",
+                                    Perks.HEALTH, 2, Perks.MOVE_SPEED, 0.10),
+                            // The override is about the shorter cooldown; the charge count
+                            // tracks the base skill.
                             List.of(new ClassSkill("bolt", "볼트마법",
-                                    Material.FLOW_BANNER_PATTERN, 3, 3))))),
+                                    Material.FLOW_BANNER_PATTERN, 3, 2))))),
 
-    SUMMONER("서머너", Material.PIG_SPAWN_EGG, "소환수를 부려 싸우는 술사",
+    SUMMONER("서머너", Material.PIG_SPAWN_EGG, "소환수를 부려 싸우는 술사", Reward.of(""),
             List.of(new ClassSkill("pig_burst", "돼지 소환", Material.GUSTER_BANNER_PATTERN, 40)),
             List.of(
                     Quest.of("sm_variety", Quest.COMMON_TAG, NamedTextColor.WHITE,
@@ -233,18 +240,26 @@ public enum MagicClass {
     private final String label;
     private final Material icon;
     private final String blurb;
+    private final Reward bonus;
     private final List<ClassSkill> skills;
     private final List<Quest> quests;
     private final List<Advancement> advancements;
 
-    MagicClass(String label, Material icon, String blurb, List<ClassSkill> skills,
+    MagicClass(String label, Material icon, String blurb, Reward bonus, List<ClassSkill> skills,
                List<Quest> quests, List<Advancement> advancements) {
         this.label = label;
         this.icon = icon;
         this.blurb = blurb;
+        this.bonus = bonus;
         this.skills = skills;
         this.quests = quests;
         this.advancements = advancements;
+    }
+
+    /** What picking this class hands over on the spot - a trade the class is built around
+     * rather than anything earned. Text-only for the classes that make no trade. */
+    public Reward bonus() {
+        return bonus;
     }
 
     public String label() {

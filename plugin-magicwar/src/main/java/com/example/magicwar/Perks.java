@@ -29,6 +29,12 @@ public class Perks {
     // ---------- vanilla stats ----------
     /** Flat extra damage on melee, arrows and spells alike. */
     public static final String DAMAGE = "damage";
+    /** Flat extra damage on spells only - anything a skill deals, lightning included. */
+    public static final String SPELL_DAMAGE = "spell_damage";
+    /** Taken off a swing of the fist or a weapon, never below one point of damage. */
+    public static final String MELEE_PENALTY = "melee_penalty";
+    /** A fraction, not a count: 0.1 is ten per cent faster on foot. */
+    public static final String MOVE_SPEED = "move_speed";
     public static final String HEALTH = "health";
     public static final String ARMOR = "armor";
     /** A cap, not a grant: taking it fills the shield, and refills top up to here. */
@@ -66,11 +72,34 @@ public class Perks {
 
     private final NamespacedKey healthKey;
     private final NamespacedKey armorKey;
+    private final NamespacedKey speedKey;
     private final Map<UUID, Map<String, Double>> earned = new ConcurrentHashMap<>();
+    private int spellDepth;
 
     public Perks(MagicWarPlugin plugin) {
         this.healthKey = new NamespacedKey(plugin, "perk_health");
         this.armorKey = new NamespacedKey(plugin, "perk_armor");
+        this.speedKey = new NamespacedKey(plugin, "perk_speed");
+    }
+
+    /**
+     * Whether the damage being dealt right now came out of a spell.
+     *
+     * <p>There is no way to tell from the event: {@code damage(amount, caster)} arrives as
+     * ENTITY_ATTACK, exactly like a swing. So {@link SkillEffects} says so on the way in, and
+     * {@link PerkListener} asks on the way out. A count rather than a flag because one spell
+     * can set off another inside the same call.
+     */
+    public void beginSpellDamage() {
+        spellDepth++;
+    }
+
+    public void endSpellDamage() {
+        spellDepth = Math.max(0, spellDepth - 1);
+    }
+
+    public boolean isSpellDamage() {
+        return spellDepth > 0;
     }
 
     /** Adds a reward to the pile and pushes whatever changed onto the player. */
@@ -116,6 +145,8 @@ public class Perks {
         double before = maxHealth(player);
         attribute(player, Attribute.MAX_HEALTH, healthKey, amount(uuid, HEALTH));
         attribute(player, Attribute.ARMOR, armorKey, amount(uuid, ARMOR));
+        attribute(player, Attribute.MOVEMENT_SPEED, speedKey, amount(uuid, MOVE_SPEED),
+                AttributeModifier.Operation.MULTIPLY_SCALAR_1);
         // New hearts arrive full: a reward that leaves the player on the same health with more
         // of it missing would read as a punishment.
         double gained = maxHealth(player) - before;
@@ -147,6 +178,11 @@ public class Perks {
     }
 
     private static void attribute(Player player, Attribute attribute, NamespacedKey key, double value) {
+        attribute(player, attribute, key, value, AttributeModifier.Operation.ADD_NUMBER);
+    }
+
+    private static void attribute(Player player, Attribute attribute, NamespacedKey key, double value,
+                                  AttributeModifier.Operation operation) {
         AttributeInstance instance = player.getAttribute(attribute);
         if (instance == null) {
             return;
@@ -155,8 +191,7 @@ public class Perks {
                 .filter(modifier -> key.equals(modifier.getKey())).toList();
         stale.forEach(instance::removeModifier);
         if (value > 0) {
-            instance.addModifier(new AttributeModifier(key, value,
-                    AttributeModifier.Operation.ADD_NUMBER));
+            instance.addModifier(new AttributeModifier(key, value, operation));
         }
     }
 
@@ -166,6 +201,7 @@ public class Perks {
         earned.remove(player.getUniqueId());
         attribute(player, Attribute.MAX_HEALTH, healthKey, 0);
         attribute(player, Attribute.ARMOR, armorKey, 0);
+        attribute(player, Attribute.MOVEMENT_SPEED, speedKey, 0);
         player.removePotionEffect(PotionEffectType.NIGHT_VISION);
         player.setAbsorptionAmount(0);
         if (player.getHealth() > maxHealth(player)) {

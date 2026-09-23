@@ -46,16 +46,42 @@ public class PerkListener implements Listener {
         this.summons = summons;
     }
 
+    /**
+     * Three adjustments, in the order they read: the flat bonus that applies to everything,
+     * then either the spell bonus or the melee penalty, never both.
+     *
+     * <p>A swing is what is left when the damage is neither a spell nor a projectile - the
+     * player themselves, with nothing between them and the victim. The penalty comes off after
+     * the bonus, so a 소서러 who has earned 주는 피해 still feels it, and never takes a hit
+     * below one point.
+     */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onDamageDealt(EntityDamageByEntityEvent event) {
         Player attacker = attacker(event);
         if (attacker == null || attacker.equals(event.getEntity())) {
             return;
         }
-        double bonus = perks.amount(attacker.getUniqueId(), Perks.DAMAGE);
-        if (bonus > 0) {
-            event.setDamage(event.getDamage() + bonus);
+        UUID uuid = attacker.getUniqueId();
+        double damage = event.getDamage() + perks.amount(uuid, Perks.DAMAGE);
+        if (isSpell(event)) {
+            damage += perks.amount(uuid, Perks.SPELL_DAMAGE);
+        } else if (event.getDamager() instanceof Player) {
+            double penalty = perks.amount(uuid, Perks.MELEE_PENALTY);
+            if (penalty > 0) {
+                damage = Math.max(MINIMUM_MELEE_DAMAGE, damage - penalty);
+            }
         }
+        if (damage != event.getDamage()) {
+            event.setDamage(damage);
+        }
+    }
+
+    /** However weak a 소서러 gets with a sword, a hit still lands. */
+    private static final double MINIMUM_MELEE_DAMAGE = 1;
+
+    /** Lightning is a spell too - it is only dealt by vanilla because 피뢰침 asked it to. */
+    private boolean isSpell(EntityDamageByEntityEvent event) {
+        return perks.isSpellDamage() || event.getDamager() instanceof LightningStrike;
     }
 
     /**

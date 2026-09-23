@@ -60,6 +60,9 @@ public class ClassController {
             lore.add(magicClass.blurb());
             lore.add("");
             lore.add("첫번째 스킬: " + magicClass.skill(0).name());
+            if (!magicClass.bonus().text().isEmpty()) {
+                lore.add("클래스 특성: " + magicClass.bonus().text());
+            }
             lore.add("");
             lore.add("클릭하여 선택");
             inv.setItem(ClassSelectHolder.slotFor(i, options.length),
@@ -106,6 +109,7 @@ public class ClassController {
         }
         MagicClass magicClass = options[index];
         classes.choose(player.getUniqueId(), magicClass);
+        award(player, magicClass.bonus());
         guide.refresh(player, classes.displayName(player.getUniqueId()));
         for (int i = 0; i < magicClass.skills().size(); i++) {
             player.getInventory().addItem(skills.create(magicClass.skill(i), i, magicClass.label()));

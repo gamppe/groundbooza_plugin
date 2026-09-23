@@ -324,7 +324,13 @@ public class SkillEffects implements Listener {
      */
     private void hurt(Player caster, LivingEntity victim, double amount, String skillId) {
         double before = victim.getHealth() + victim.getAbsorptionAmount();
-        victim.damage(amount, caster);
+        // Marked, because the event this raises is indistinguishable from a sword swing.
+        perks.beginSpellDamage();
+        try {
+            victim.damage(amount, caster);
+        } finally {
+            perks.endSpellDamage();
+        }
         summons.rally(caster, victim);
         if (skillId == null) {
             return;
