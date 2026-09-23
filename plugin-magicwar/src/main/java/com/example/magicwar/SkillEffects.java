@@ -99,8 +99,6 @@ public class SkillEffects implements Listener {
     private static final Material ERUPTION_MARKER = Material.MAGMA_BLOCK;
     private static final double ICE_SPIKE_DAMAGE = 8.0;
     private static final int ICE_SPIKE_LINGER_TICKS = 6 * 20;
-    /** Half-width of the sheet of ice the cast lays down underfoot: 2 gives 5x5. */
-    private static final int ICE_SPIKE_BASE_RADIUS = 2;
 
     // ---------- 파이로맨서 ----------
     /** Small enough to singe rather than crater - block damage is off regardless. */
@@ -555,19 +553,10 @@ public class SkillEffects implements Listener {
     /** Eight lines of ice crawling outward a block every couple of ticks. Anything standing
      * where a spike appears is hit once - the line remembers who it caught, so a mob frozen in
      * place is not hit again by the same line. */
-    /** Every block an 얼음송곳 cast would cover: the sheet underfoot, then each arm walking
-     * outward exactly as growSpikeLine does. Shared with the marker so the two cannot drift. */
+    /** Every block an 얼음송곳 cast would cover: each arm walking outward exactly as
+     * growSpikeLine does. Shared with the marker so the two cannot drift. */
     private List<Block> spikeFootprint(Location origin) {
         List<Block> blocks = new ArrayList<>();
-        for (int dx = -ICE_SPIKE_BASE_RADIUS; dx <= ICE_SPIKE_BASE_RADIUS; dx++) {
-            for (int dz = -ICE_SPIKE_BASE_RADIUS; dz <= ICE_SPIKE_BASE_RADIUS; dz++) {
-                Block surface = frost.surfaceAt(origin, origin.getBlockX() + dx, origin.getBlockZ() + dz,
-                        origin.getBlockY());
-                if (surface != null) {
-                    blocks.add(surface);
-                }
-            }
-        }
         for (int i = 0; i < ICE_SPIKE_DIRECTIONS; i++) {
             double angle = Math.PI * 2 * i / ICE_SPIKE_DIRECTIONS;
             double dx = Math.cos(angle);
@@ -602,16 +591,6 @@ public class SkillEffects implements Listener {
         Location origin = player.getLocation().clone();
         preview.hide(player.getUniqueId());
         player.getWorld().playSound(origin, Sound.BLOCK_GLASS_BREAK, 1.4f, 0.5f);
-        // The lines start a couple of blocks out, so the caster stands on ice of their own.
-        for (int dx = -ICE_SPIKE_BASE_RADIUS; dx <= ICE_SPIKE_BASE_RADIUS; dx++) {
-            for (int dz = -ICE_SPIKE_BASE_RADIUS; dz <= ICE_SPIKE_BASE_RADIUS; dz++) {
-                Block surface = frost.surfaceAt(origin, origin.getBlockX() + dx, origin.getBlockZ() + dz,
-                        origin.getBlockY());
-                if (surface != null) {
-                    frost.placeTemporary(surface, Material.PACKED_ICE, ICE_SPIKE_LINGER_TICKS);
-                }
-            }
-        }
         for (int i = 0; i < ICE_SPIKE_DIRECTIONS; i++) {
             double angle = Math.PI * 2 * i / ICE_SPIKE_DIRECTIONS;
             growSpikeLine(player, origin, Math.cos(angle), Math.sin(angle));
