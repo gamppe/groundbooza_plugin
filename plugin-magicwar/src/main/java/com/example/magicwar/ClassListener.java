@@ -101,14 +101,15 @@ public class ClassListener implements Listener {
         if (!effects.cast(player, skill)) {
             return;
         }
+        // The name goes up here rather than inside each skill, so every cast announces itself
+        // the same way and a hit stays silent.
         if (followUp) {
+            player.sendActionBar(Component.text(skill.name(), NamedTextColor.AQUA));
             return;
         }
         int left = cooldowns.consume(player, skill);
-        if (left >= 0) {
-            player.sendActionBar(Component.text(skill.name() + " (" + left + "/" + skill.charges() + ")",
-                    NamedTextColor.AQUA));
-        }
+        player.sendActionBar(Component.text(skill.name()
+                + (left >= 0 ? " (" + left + "/" + skill.charges() + ")" : ""), NamedTextColor.AQUA));
     }
 
     @EventHandler(ignoreCancelled = true)

@@ -3,6 +3,8 @@ package com.example.magicwar;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Entity;
@@ -19,7 +21,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Bookkeeping the 빙결사 skills share: who is frostbitten, who is silenced, and which blocks
+ * Bookkeeping the 서리기사 skills share: who is frostbitten, who is silenced, and which blocks
  * were turned to ice and owe a restore.
  *
  * <p>동상 is vanilla's powder-snow freeze used purely as a visual. Vanilla decays freeze ticks
@@ -41,6 +43,7 @@ public class FrostState implements Listener {
     /** Entity id to when it may cast again. */
     private final Map<UUID, Long> silenced = new HashMap<>();
     private final List<TempBlock> tempBlocks = new ArrayList<>();
+    private final java.util.Random random = new java.util.Random();
 
     public FrostState(MagicWarPlugin plugin) {
         this.plugin = plugin;
@@ -130,7 +133,17 @@ public class FrostState implements Listener {
                 continue;
             }
             blocks.remove();
+            Material was = temp.block().getType();
             temp.block().setBlockData(temp.original(), false);
+            temp.block().getWorld().spawnParticle(Particle.BLOCK,
+                    temp.block().getLocation().add(0.5, 0.5, 0.5), 12, 0.3, 0.3, 0.3, 0.0,
+                    was.createBlockData());
+            // A cast lays down well over a hundred blocks; every one of them cracking at once
+            // would be a wall of noise, so only a scattering of them is heard.
+            if (random.nextInt(8) == 0) {
+                temp.block().getWorld().playSound(temp.block().getLocation(),
+                        Sound.BLOCK_GLASS_BREAK, 0.6f, 1.2f);
+            }
         }
     }
 

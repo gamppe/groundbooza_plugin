@@ -90,6 +90,8 @@ public class SkillEffects implements Listener {
     private static final int ICE_SPIKE_STEP_TICKS = 2;
     private static final double ICE_SPIKE_DAMAGE = 8.0;
     private static final int ICE_SPIKE_LINGER_TICKS = 6 * 20;
+    /** Half-width of the sheet of ice the cast lays down underfoot: 2 gives 5x5. */
+    private static final int ICE_SPIKE_BASE_RADIUS = 2;
 
     private static final int DUST_RING_POINTS = 16;
     private static final double DUST_RING_RADIUS = 2.2;
@@ -150,16 +152,20 @@ public class SkillEffects implements Listener {
 
     /** Hide or restore the sweep on whichever item carries this skill. Silent when the player
      * somehow no longer owns it. */
-    private void showFollowUp(Player player, String skillId, boolean pending) {
+    private void showFollowUp(Player player, String skillId, boolean pending, int windowTicks) {
         ClassSkill skill = classes.skillById(player.getUniqueId(), skillId);
         if (skill == null) {
             return;
         }
         if (pending) {
-            cooldowns.suspend(player, skill);
+            cooldowns.suspend(player, skill, windowTicks);
         } else {
             cooldowns.resume(player, skill);
         }
+    }
+
+    private void showFollowUp(Player player, String skillId, boolean pending) {
+        showFollowUp(player, skillId, pending, 0);
     }
 
     private boolean isMonk(Player player) {
@@ -198,7 +204,6 @@ public class SkillEffects implements Listener {
             }, WAVE_SHOT_MONK_LIFETIME_TICKS);
         }
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_BREEZE_SHOOT, 1f, 1.1f);
-        player.sendActionBar(Component.text("파동탄!", NamedTextColor.AQUA));
         return true;
     }
 
@@ -241,14 +246,12 @@ public class SkillEffects implements Listener {
                     frost.applyFrostbite(target, FROSTBITE_SECONDS);
                     target.getWorld().spawnParticle(Particle.SNOWFLAKE, target.getLocation().add(0, 1, 0),
                             25, 0.4, 0.6, 0.4, 0.02);
-                    shooter.sendActionBar(Component.text("동상!", NamedTextColor.AQUA));
                 }
             } else if (monk) {
                 markBlink(shooter, target);
             } else {
                 // Landing the hit is what pays out, so a miss gives nothing.
                 shooter.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, WAVE_SHOT_REWARD_TICKS, 0));
-                shooter.sendActionBar(Component.text("명중! 신속 10초", NamedTextColor.AQUA));
             }
             return;
         }
@@ -257,7 +260,7 @@ public class SkillEffects implements Listener {
     private void markBlink(Player player, LivingEntity target) {
         blinks.put(player.getUniqueId(), new Blink(target.getUniqueId(), target.getLocation().clone(),
                 System.currentTimeMillis() + BLINK_WINDOW_MILLIS));
-        showFollowUp(player, "wave_shot", true);
+        showFollowUp(player, "wave_shot", true, (int) (BLINK_WINDOW_MILLIS / 50));
         player.playSound(player, Sound.BLOCK_BEACON_ACTIVATE, 0.7f, 1.8f);
         player.sendActionBar(Component.text("3초 내로 다시 시전하면 그 자리로 이동합니다", NamedTextColor.GOLD));
     }
@@ -308,7 +311,6 @@ public class SkillEffects implements Listener {
         }
         target.getWorld().spawnParticle(Particle.SWEEP_ATTACK, target.clone().add(0, 1, 0), 8, 1.0, 0.5, 1.0);
         target.getWorld().playSound(target, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 1.2f, 0.9f);
-        player.sendActionBar(Component.text("추격!", NamedTextColor.GOLD));
         return true;
     }
 
@@ -355,7 +357,6 @@ public class SkillEffects implements Listener {
                 System.currentTimeMillis()));
         showFollowUp(player, "thunder_strike", false);
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_WIND_CHARGE_THROW, 1f, 0.8f);
-        player.sendActionBar(Component.text("뇌격!", NamedTextColor.GOLD));
         return true;
     }
 
@@ -478,7 +479,6 @@ public class SkillEffects implements Listener {
                 ICE_PRISON_SLOW_AMPLIFIER));
         frost.silence(target.getUniqueId(), ICE_PRISON_TICKS);
         target.getWorld().playSound(centre, Sound.BLOCK_GLASS_PLACE, 1.2f, 0.6f);
-        caster.sendActionBar(Component.text("얼음 감옥!", NamedTextColor.AQUA));
 
         UUID targetId = target.getUniqueId();
         Bukkit.getScheduler().runTaskLater(plugin, () -> shatterPrison(caster, targetId, centre), ICE_PRISON_TICKS);
@@ -503,6 +503,16 @@ public class SkillEffects implements Listener {
     private boolean iceSpike(Player player) {
         Location origin = player.getLocation().clone();
         player.getWorld().playSound(origin, Sound.BLOCK_GLASS_BREAK, 1.4f, 0.5f);
+        // The lines start a couple of blocks out, so the caster stands on ice of their own.
+        for (int dx = -ICE_SPIKE_BASE_RADIUS; dx <= ICE_SPIKE_BASE_RADIUS; dx++) {
+            for (int dz = -ICE_SPIKE_BASE_RADIUS; dz <= ICE_SPIKE_BASE_RADIUS; dz++) {
+                Block surface = frost.surfaceAt(origin, origin.getBlockX() + dx, origin.getBlockZ() + dz,
+                        origin.getBlockY());
+                if (surface != null) {
+                    frost.placeTemporary(surface, Material.PACKED_ICE, ICE_SPIKE_LINGER_TICKS);
+                }
+            }
+        }
         for (int i = 0; i < ICE_SPIKE_DIRECTIONS; i++) {
             double angle = Math.PI * 2 * i / ICE_SPIKE_DIRECTIONS;
             growSpikeLine(player, origin, Math.cos(angle), Math.sin(angle));
@@ -604,12 +614,12 @@ public class SkillEffects implements Listener {
 
     // ---------- not written yet ----------
 
+    @SuppressWarnings("unused") // skill is part of the dispatch signature
     private boolean placeholder(Player player, ClassSkill skill) {
         var from = player.getEyeLocation();
         player.getWorld().spawnParticle(Particle.ENCHANT, from.clone().add(from.getDirection().multiply(1.5)),
                 40, 0.4, 0.4, 0.4, 0.5);
         player.getWorld().playSound(from, Sound.ENTITY_ILLUSIONER_CAST_SPELL, 1f, 1.2f);
-        player.sendActionBar(Component.text(skill.name() + " 사용!", NamedTextColor.AQUA));
         return true;
     }
 

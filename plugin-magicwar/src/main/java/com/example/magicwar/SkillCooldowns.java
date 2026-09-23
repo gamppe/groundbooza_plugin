@@ -25,8 +25,10 @@ public class SkillCooldowns {
         int charges;
         /** When the next charge lands; 0 when the skill is full. */
         long nextRefillMillis;
-        /** True while a follow-up cast is pending, so the sweep is hidden. */
+        /** True while a follow-up cast is pending. */
         boolean suspended;
+        /** What to draw while suspended: the follow-up window in ticks, or 0 for nothing. */
+        int suspendedDisplayTicks;
 
         State(int charges) {
             this.charges = charges;
@@ -82,11 +84,18 @@ public class SkillCooldowns {
         return skill.charges() <= 1 ? -1 : state.charges;
     }
 
-    /** Hides the sweep while a follow-up is available, so the item does not look unusable at
-     * the exact moment it is most usable. */
-    public void suspend(Player player, ClassSkill skill) {
+    /**
+     * Takes the real cooldown off the icon while a follow-up is available.
+     *
+     * @param displayTicks when the follow-up window is itself timed, the sweep shows that
+     *                     instead - so 수도사's three seconds to blink read off the icon. Pass
+     *                     0 for a window with no clock (뇌격 lasts until you land), which
+     *                     leaves the icon clear.
+     */
+    public void suspend(Player player, ClassSkill skill, int displayTicks) {
         State state = of(player, skill);
         state.suspended = true;
+        state.suspendedDisplayTicks = displayTicks;
         draw(player, skill, state);
     }
 
@@ -94,6 +103,7 @@ public class SkillCooldowns {
     public void resume(Player player, ClassSkill skill) {
         State state = of(player, skill);
         state.suspended = false;
+        state.suspendedDisplayTicks = 0;
         refill(state, skill);
         draw(player, skill, state);
     }
@@ -101,7 +111,11 @@ public class SkillCooldowns {
     /** The vanilla cooldown is only ever a picture of the state above. */
     private void draw(Player player, ClassSkill skill, State state) {
         Key key = SkillItem.cooldownKey(skill);
-        if (state.suspended || state.charges > 0 || state.nextRefillMillis == 0) {
+        if (state.suspended) {
+            player.setCooldown(key, state.suspendedDisplayTicks);
+            return;
+        }
+        if (state.charges > 0 || state.nextRefillMillis == 0) {
             player.setCooldown(key, 0);
             return;
         }
