@@ -33,14 +33,14 @@ public class QuestManager {
                     Material.COBBLESTONE, "경험치 20", Set.of(Material.STONE, Material.COBBLESTONE,
                             Material.DEEPSLATE, Material.COBBLED_DEEPSLATE)));
 
-    /** Board order == slot order in ClassUpgradeHolder: 전직 quests first, then the shared ones. */
+    /** Board order == slot order in ClassUpgradeHolder: the shared quests first, then the 전직
+     * ones. */
     public static List<Quest> boardFor(MagicClass magicClass) {
         if (magicClass == null) {
             return COMMON;
         }
-        List<Quest> board = new ArrayList<>();
+        List<Quest> board = new ArrayList<>(COMMON);
         magicClass.advancements().forEach(advancement -> board.add(advancement.quest()));
-        board.addAll(COMMON);
         return List.copyOf(board);
     }
 

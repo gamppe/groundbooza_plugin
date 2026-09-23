@@ -15,8 +15,9 @@ public class ClassUpgradeHolder implements InventoryHolder {
     public static final int SLOT_CLASS = 4;
     public static final int SLOT_ADVANCE = 53;
 
-    /** Icon slots in board order, matching QuestManager.BOARD. */
-    private static final int[] QUEST_SLOTS = {12, 14, 29, 31, 33};
+    /** Icon slots in board order: the three shared quests across row 2, then the two 전직
+     * quests on row 4. */
+    private static final int[] QUEST_SLOTS = {11, 13, 15, 30, 32};
 
     private Inventory inventory;
 

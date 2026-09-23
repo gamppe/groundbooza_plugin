@@ -65,7 +65,6 @@ public class SkillEffects implements Listener {
     private static final double WAVE_SHOT_SPEED = 1.6;
     /** Deliberately gentle - the wind burst vanilla would apply is far stronger. */
     private static final double WAVE_SHOT_KNOCKBACK = 0.45;
-    private static final int WAVE_SHOT_REWARD_TICKS = 10 * 20;
     private static final int WAVE_SHOT_MONK_LIFETIME_TICKS = 2 * 20;
     private static final long BLINK_WINDOW_MILLIS = 3000;
     private static final double BLINK_DAMAGE = 5.0;
@@ -133,8 +132,8 @@ public class SkillEffects implements Listener {
     private static final int ICE_SPIKE_DIRECTIONS = 8;
     private static final int ICE_SPIKE_RANGE = 20;
     private static final int ICE_SPIKE_STEP_TICKS = 2;
-    /** Blocks either side of the centre line: 1 makes each arm three wide. */
-    private static final int ICE_SPIKE_HALF_WIDTH = 1;
+    /** Blocks either side of the centre line: 0 keeps each arm a single file. */
+    private static final int ICE_SPIKE_HALF_WIDTH = 0;
     private static final Material ICE_SPIKE_MARKER = Material.BLUE_STAINED_GLASS;
     private static final Material ERUPTION_MARKER = Material.MAGMA_BLOCK;
     private static final double ICE_SPIKE_DAMAGE = 8.0;
@@ -362,9 +361,6 @@ public class SkillEffects implements Listener {
                 }
             } else if (monk) {
                 markBlink(shooter, target);
-            } else {
-                // Landing the hit is what pays out, so a miss gives nothing.
-                shooter.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, WAVE_SHOT_REWARD_TICKS, 0));
             }
             return;
         }
