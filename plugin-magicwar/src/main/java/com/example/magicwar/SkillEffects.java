@@ -81,7 +81,9 @@ public class SkillEffects implements Listener {
 
     // ---------- 일렉트로맨서 ----------
     private static final double BOLT_BEAM_DAMAGE = 2.0;
-    private static final int BOLT_BEAM_RANGE = 30;
+    /** Comfortably past BOLT_SNIPE_RANGE, or the 저격 quest would be asking for a shot the
+     * beam cannot reach. */
+    private static final int BOLT_BEAM_RANGE = 60;
     /** Widens the beam a little so a shot that looks like a hit is one. */
     private static final double BOLT_BEAM_FORGIVENESS = 0.25;
     private static final int ROOT_TICKS = 4; // 0.2s
