@@ -15,6 +15,7 @@ import org.bukkit.block.data.BlockData;
 import org.bukkit.Sound;
 import org.bukkit.entity.BreezeWindCharge;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.LightningStrike;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.Monster;
@@ -1087,7 +1088,11 @@ public class SkillEffects implements Listener {
     /** One bolt per 감전 stack, a few ticks apart so they read as a volley rather than a single
      * flash. Real lightning: vanilla deals 5, comfortably under the 8 that would have been
      * worth faking - it does set the target alight and can charge a creeper, which is part of
-     * the deal. */
+     * the deal.
+     *
+     * <p>The caster is written onto each bolt. Without it the damage arrives from a lightning
+     * entity that belongs to nobody, and 주는 피해 - which every other spell gets - would skip
+     * the one spell whose damage vanilla deals for us. */
     private void callLightning(Player caster, LivingEntity target, int strikes) {
         new BukkitRunnable() {
             int left = strikes;
@@ -1098,7 +1103,8 @@ public class SkillEffects implements Listener {
                     cancel();
                     return;
                 }
-                target.getWorld().strikeLightning(target.getLocation());
+                LightningStrike bolt = target.getWorld().strikeLightning(target.getLocation());
+                bolt.setCausingPlayer(caster);
                 tracker.fire(caster, Quest.Goal.ROD_STRIKE, null);
             }
         }.runTaskTimer(plugin, ROD_DELAY_TICKS, ROD_REPEAT_TICKS);

@@ -2,6 +2,7 @@ package com.example.magicwar;
 
 import org.bukkit.Bukkit;
 import org.bukkit.entity.EntityCategory;
+import org.bukkit.entity.LightningStrike;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
@@ -57,8 +58,13 @@ public class PerkListener implements Listener {
         }
     }
 
-    /** The player behind the blow: the damager itself, or whoever loosed the projectile. A
-     * summon is nobody - the bonus is for what the player does with their own hands. */
+    /**
+     * The player behind the blow: the damager itself, whoever loosed the projectile, or whoever
+     * called the lightning down. A summon is nobody - the bonus is for what the player does
+     * themselves.
+     *
+     * <p>Natural lightning has no causing player, so a storm stays a storm.
+     */
     private static Player attacker(EntityDamageByEntityEvent event) {
         if (event.getDamager() instanceof Player player) {
             return player;
@@ -66,6 +72,9 @@ public class PerkListener implements Listener {
         if (event.getDamager() instanceof Projectile projectile) {
             ProjectileSource shooter = projectile.getShooter();
             return shooter instanceof Player player ? player : null;
+        }
+        if (event.getDamager() instanceof LightningStrike bolt) {
+            return bolt.getCausingPlayer();
         }
         return null;
     }
