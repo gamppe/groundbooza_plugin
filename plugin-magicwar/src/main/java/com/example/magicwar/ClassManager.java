@@ -59,7 +59,11 @@ public class ClassManager {
         if (pick == null) {
             return java.util.List.of();
         }
-        java.util.List<ClassSkill> owned = new java.util.ArrayList<>(pick.magicClass.skills());
+        java.util.List<ClassSkill> owned = new java.util.ArrayList<>();
+        for (ClassSkill base : pick.magicClass.skills()) {
+            // An advancement may rename or re-time a skill it inherits; the id stays the same.
+            owned.add(pick.advancement == null ? base : pick.advancement.apply(base));
+        }
         if (pick.advancement != null) {
             owned.add(pick.advancement.skill());
         }

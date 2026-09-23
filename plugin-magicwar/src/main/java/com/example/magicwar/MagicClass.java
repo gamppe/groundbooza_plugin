@@ -25,11 +25,13 @@ public enum MagicClass {
                             Quest.kill("adv_monk", "수도사", NamedTextColor.GOLD,
                                     "좀비 5마리 잡기", 5, Material.ROTTEN_FLESH, "수도사 전직 해금",
                                     EntityType.ZOMBIE)),
-                    new Advancement("spellblade", "스펠블레이드", Material.DIAMOND_SWORD, NamedTextColor.RED,
-                            new ClassSkill("spellblade_2", "두번째 스킬", Material.PIGLIN_BANNER_PATTERN, 20),
-                            Quest.kill("adv_spellblade", "스펠블레이드", NamedTextColor.RED,
-                                    "거미 5마리 잡기", 5, Material.STRING, "스펠블레이드 전직 해금",
-                                    EntityType.SPIDER)))),
+                    new Advancement("frost_knight", "서리기사", Material.DIAMOND_SWORD, NamedTextColor.AQUA,
+                            new ClassSkill("ice_spike", "얼음송곳", Material.PIGLIN_BANNER_PATTERN, 20),
+                            Quest.kill("adv_frost_knight", "서리기사", NamedTextColor.AQUA,
+                                    "거미 5마리 잡기", 5, Material.STRING, "서리기사 전직 해금",
+                                    EntityType.SPIDER),
+                            List.of(new ClassSkill("wave_shot", "얼음뭉치",
+                                    Material.SKULL_BANNER_PATTERN, 8))))),
 
     SORCERER("소서러", Material.FIRE_CHARGE, "원거리 주문으로 싸우는 마법사",
             List.of(new ClassSkill("bolt", "볼트마법", Material.FLOW_BANNER_PATTERN, 6, 3)),
@@ -59,9 +61,27 @@ public enum MagicClass {
                                     "양 5마리 잡기", 5, Material.WHITE_WOOL, "정령술사 전직 해금",
                                     EntityType.SHEEP))));
 
-    /** A tier-2 class: its own colour, its own extra skill, and the quest that unlocks it. */
+    /**
+     * A tier-2 class: its own colour, its own extra skill, and the quest that unlocks it.
+     *
+     * @param overrides replacements for base-class skills, matched by id. This is how an
+     *                  advancement renames or re-times a skill it inherits - 서리기사 turns
+     *                  파동탄 into 얼음뭉치 on a shorter cooldown without it becoming a
+     *                  separate skill, so the item and its cooldown group carry straight over.
+     */
     public record Advancement(String id, String label, Material icon, NamedTextColor color,
-                              ClassSkill skill, Quest quest) {}
+                              ClassSkill skill, Quest quest, List<ClassSkill> overrides) {
+
+        public Advancement(String id, String label, Material icon, NamedTextColor color,
+                           ClassSkill skill, Quest quest) {
+            this(id, label, icon, color, skill, quest, List.of());
+        }
+
+        /** The replacement for {@code base}, or {@code base} itself when nothing overrides it. */
+        public ClassSkill apply(ClassSkill base) {
+            return overrides.stream().filter(o -> o.id().equals(base.id())).findFirst().orElse(base);
+        }
+    }
 
     private final String label;
     private final Material icon;

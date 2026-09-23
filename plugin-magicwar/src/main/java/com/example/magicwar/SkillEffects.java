@@ -24,6 +24,7 @@ import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 
 import java.util.HashMap;
@@ -78,6 +79,18 @@ public class SkillEffects implements Listener {
     private static final int THUNDER_SLOW_TICKS = 3 * 20;
     /** Give up waiting for a landing after this, so nobody is left mid-skill forever. */
     private static final long THUNDER_TIMEOUT_MILLIS = 15000;
+    // ---------- 서리기사 ----------
+    private static final int FROSTBITE_SECONDS = 10;
+    private static final int ICE_PRISON_TICKS = 2 * 20;
+    private static final int ICE_PRISON_SLOW_AMPLIFIER = 9; // 구속 X
+    private static final double ICE_PRISON_DAMAGE = 5.0;
+    private static final double ICE_PRISON_RADIUS = 1.6;
+    private static final int ICE_SPIKE_DIRECTIONS = 8;
+    private static final int ICE_SPIKE_RANGE = 20;
+    private static final int ICE_SPIKE_STEP_TICKS = 2;
+    private static final double ICE_SPIKE_DAMAGE = 8.0;
+    private static final int ICE_SPIKE_LINGER_TICKS = 6 * 20;
+
     private static final int DUST_RING_POINTS = 16;
     private static final double DUST_RING_RADIUS = 2.2;
 
@@ -93,6 +106,7 @@ public class SkillEffects implements Listener {
     private final MagicWarPlugin plugin;
     private final ClassManager classes;
     private final SkillCooldowns cooldowns;
+    private final FrostState frost;
     private final NamespacedKey waveShotKey;
     private final NamespacedKey boltKey;
     private final Random random = new Random();
@@ -101,10 +115,12 @@ public class SkillEffects implements Listener {
     /** Players mid-뇌격, exempt from fall damage until shortly after they touch down. */
     private final Set<UUID> noFall = new HashSet<>();
 
-    public SkillEffects(MagicWarPlugin plugin, ClassManager classes, SkillCooldowns cooldowns) {
+    public SkillEffects(MagicWarPlugin plugin, ClassManager classes, SkillCooldowns cooldowns,
+                        FrostState frost) {
         this.plugin = plugin;
         this.classes = classes;
         this.cooldowns = cooldowns;
+        this.frost = frost;
         this.waveShotKey = new NamespacedKey(plugin, "wave_shot");
         this.boltKey = new NamespacedKey(plugin, "bolt");
     }
@@ -127,6 +143,7 @@ public class SkillEffects implements Listener {
             case "bolt" -> bolt(player);
             case "pig_burst" -> pigBurst(player);
             case "thunder_strike" -> thunderStrike(player);
+            case "ice_spike" -> iceSpike(player);
             default -> placeholder(player, skill);
         };
     }
@@ -146,8 +163,21 @@ public class SkillEffects implements Listener {
     }
 
     private boolean isMonk(Player player) {
+        return isAdvancement(player, "monk");
+    }
+
+    private boolean isFrostKnight(Player player) {
+        return isAdvancement(player, "frost_knight");
+    }
+
+    private boolean isAdvancement(Player player, String id) {
         MagicClass.Advancement advancement = classes.advancementOf(player.getUniqueId());
-        return advancement != null && advancement.id().equals("monk");
+        return advancement != null && advancement.id().equals(id);
+    }
+
+    /** Sealed inside an ice prison - checked by the caller before any skill goes off. */
+    public boolean isSilenced(Player player) {
+        return frost.isSilenced(player.getUniqueId());
     }
 
     // ---------- 배틀메이지 1 : 파동탄 (수도사면 2단 스킬) ----------
@@ -185,7 +215,10 @@ public class SkillEffects implements Listener {
             return;
         }
         boolean monk = isMonk(shooter);
+        boolean frostKnight = isFrostKnight(shooter);
         Entity hit = event.getHitEntity();
+        // Read before any damage lands, so a target that dies to the hit still counts as sealed.
+        boolean wasFrostbitten = hit != null && frost.isFrostbitten(hit);
 
         if (hit instanceof LivingEntity target && !target.equals(shooter)) {
             event.setCancelled(true);
@@ -200,7 +233,17 @@ public class SkillEffects implements Listener {
             target.getWorld().spawnParticle(Particle.GUST, target.getLocation().add(0, 1, 0), 1);
             target.getWorld().playSound(target.getLocation(), Sound.ENTITY_WIND_CHARGE_WIND_BURST, 1f, 1.3f);
 
-            if (monk) {
+            if (frostKnight) {
+                // A second hit on something already frostbitten is the payoff: it gets sealed.
+                if (wasFrostbitten) {
+                    icePrison(shooter, target);
+                } else {
+                    frost.applyFrostbite(target, FROSTBITE_SECONDS);
+                    target.getWorld().spawnParticle(Particle.SNOWFLAKE, target.getLocation().add(0, 1, 0),
+                            25, 0.4, 0.6, 0.4, 0.02);
+                    shooter.sendActionBar(Component.text("동상!", NamedTextColor.AQUA));
+                }
+            } else if (monk) {
                 markBlink(shooter, target);
             } else {
                 // Landing the hit is what pays out, so a miss gives nothing.
@@ -406,6 +449,102 @@ public class SkillEffects implements Listener {
             at.getWorld().spawnParticle(Particle.BLOCK, edge, 10, 0.3, 0.2, 0.3, 0.12, data);
         }
         at.getWorld().playSound(at, Sound.ENTITY_GENERIC_EXPLODE, 0.7f, 0.6f);
+    }
+
+    // ---------- 서리기사 : 얼음 감옥 ----------
+
+    /** Seals a frostbitten target in a shell of ice for two seconds: slowed to a standstill,
+     * unable to cast, and cracked open at the end for damage. The shell is temporary blocks,
+     * so it goes back to whatever was there even if the round ends mid-freeze. */
+    private void icePrison(Player caster, LivingEntity target) {
+        Location centre = target.getLocation().add(0, 1, 0);
+        int radius = (int) Math.ceil(ICE_PRISON_RADIUS);
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                    // Shell only: a solid ball would swallow the mob and hide the effect.
+                    if (distance > ICE_PRISON_RADIUS || distance < ICE_PRISON_RADIUS - 1) {
+                        continue;
+                    }
+                    Block block = centre.clone().add(dx, dy, dz).getBlock();
+                    if (block.getType().isAir() || !block.getType().isSolid()) {
+                        frost.placeTemporary(block, Material.ICE, ICE_PRISON_TICKS);
+                    }
+                }
+            }
+        }
+        target.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, ICE_PRISON_TICKS,
+                ICE_PRISON_SLOW_AMPLIFIER));
+        frost.silence(target.getUniqueId(), ICE_PRISON_TICKS);
+        target.getWorld().playSound(centre, Sound.BLOCK_GLASS_PLACE, 1.2f, 0.6f);
+        caster.sendActionBar(Component.text("얼음 감옥!", NamedTextColor.AQUA));
+
+        UUID targetId = target.getUniqueId();
+        Bukkit.getScheduler().runTaskLater(plugin, () -> shatterPrison(caster, targetId, centre), ICE_PRISON_TICKS);
+    }
+
+    private void shatterPrison(Player caster, UUID targetId, Location centre) {
+        centre.getWorld().playSound(centre, Sound.BLOCK_GLASS_BREAK, 1.2f, 0.8f);
+        centre.getWorld().spawnParticle(Particle.BLOCK, centre, 60, 0.8, 0.8, 0.8, 0.1,
+                Material.ICE.createBlockData());
+        Entity sealed = Bukkit.getEntity(targetId);
+        if (sealed instanceof LivingEntity alive && alive.isValid()) {
+            alive.damage(ICE_PRISON_DAMAGE, caster);
+            frost.clearFrostbite(alive);
+        }
+    }
+
+    // ---------- 서리기사 2 : 얼음송곳 ----------
+
+    /** Eight lines of ice crawling outward a block every couple of ticks. Anything standing
+     * where a spike appears is hit once - the line remembers who it caught, so a mob frozen in
+     * place is not hit again by the same line. */
+    private boolean iceSpike(Player player) {
+        Location origin = player.getLocation().clone();
+        player.getWorld().playSound(origin, Sound.BLOCK_GLASS_BREAK, 1.4f, 0.5f);
+        for (int i = 0; i < ICE_SPIKE_DIRECTIONS; i++) {
+            double angle = Math.PI * 2 * i / ICE_SPIKE_DIRECTIONS;
+            growSpikeLine(player, origin, Math.cos(angle), Math.sin(angle));
+        }
+        return true;
+    }
+
+    private void growSpikeLine(Player caster, Location origin, double dx, double dz) {
+        Set<UUID> alreadyHit = new HashSet<>();
+        new BukkitRunnable() {
+            int step = 1;
+            int lastY = origin.getBlockY();
+
+            @Override
+            public void run() {
+                if (step > ICE_SPIKE_RANGE || !caster.isOnline()) {
+                    cancel();
+                    return;
+                }
+                int x = origin.getBlockX() + (int) Math.round(dx * step);
+                int z = origin.getBlockZ() + (int) Math.round(dz * step);
+                Block surface = frost.surfaceAt(origin, x, z, lastY);
+                step++;
+                if (surface == null) {
+                    return; // a cliff or an overhang - skip this block, keep crawling
+                }
+                lastY = surface.getY();
+                frost.placeTemporary(surface, Material.PACKED_ICE, ICE_SPIKE_LINGER_TICKS);
+                surface.getWorld().spawnParticle(Particle.SNOWFLAKE,
+                        surface.getLocation().add(0.5, 1, 0.5), 8, 0.2, 0.4, 0.2, 0.01);
+
+                for (Entity nearby : surface.getWorld().getNearbyEntities(
+                        surface.getLocation().add(0.5, 1, 0.5), 0.8, 1.2, 0.8)) {
+                    if (!(nearby instanceof LivingEntity victim) || victim.equals(caster)
+                            || !alreadyHit.add(victim.getUniqueId())) {
+                        continue;
+                    }
+                    victim.damage(ICE_SPIKE_DAMAGE, caster);
+                    frost.applyFrostbite(victim, FROSTBITE_SECONDS);
+                }
+            }
+        }.runTaskTimer(plugin, 0L, ICE_SPIKE_STEP_TICKS);
     }
 
     // ---------- 소서러 1 : 볼트마법 ----------

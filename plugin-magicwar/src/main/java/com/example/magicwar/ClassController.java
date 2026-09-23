@@ -130,6 +130,8 @@ public class ClassController {
         guide.refresh(player, classes.displayName(uuid));
         player.getInventory().addItem(skills.create(picked.skill(),
                 base.skills().size(), picked.label()));
+        // The advancement may have renamed a skill they already carry.
+        skills.refreshCarried(player, classes.ownedSkills(uuid), picked.label());
         player.playSound(player, Sound.UI_TOAST_CHALLENGE_COMPLETE, 1f, 1f);
         player.sendMessage(Component.text(picked.label() + " (으)로 전직했습니다! 두번째 스킬을 얻었습니다.",
                 NamedTextColor.LIGHT_PURPLE));

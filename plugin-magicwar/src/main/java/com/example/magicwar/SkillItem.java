@@ -5,6 +5,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.NamespacedKey;
+import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.components.UseCooldownComponent;
@@ -84,5 +85,46 @@ public class SkillItem {
 
     public boolean isSkillItem(ItemStack item) {
         return skillIdOf(item) != null;
+    }
+
+    /** Re-stamps every skill item the player carries. An advancement can rename or re-time a
+     * skill it inherits, and the name and cooldown are baked into the item at creation - so
+     * without this the hotbar would still read 파동탄 after becoming a 서리기사. */
+    public void refreshCarried(Player player, List<ClassSkill> owned, String owner) {
+        ItemStack[] contents = player.getInventory().getContents();
+        for (int i = 0; i < contents.length; i++) {
+            String id = skillIdOf(contents[i]);
+            if (id == null) {
+                continue;
+            }
+            for (int slot = 0; slot < owned.size(); slot++) {
+                ClassSkill skill = owned.get(slot);
+                if (!skill.id().equals(id)) {
+                    continue;
+                }
+                boolean bound = contents[i].getType() != skill.icon();
+                ItemStack replacement = bound
+                        ? stampFresh(contents[i], skill, slot, owner, true)
+                        : create(skill, slot, owner);
+                replacement.setAmount(contents[i].getAmount());
+                player.getInventory().setItem(i, replacement);
+                break;
+            }
+        }
+    }
+
+    /** Re-stamp that drops the lore the previous stamp added, so repeated renames do not pile
+     * lines up on a bound item. */
+    private ItemStack stampFresh(ItemStack item, ClassSkill skill, int slot, String owner, boolean bound) {
+        ItemMeta meta = item.getItemMeta();
+        if (meta.hasLore()) {
+            List<Component> lore = new ArrayList<>(meta.lore());
+            if (lore.size() >= 2) {
+                lore.subList(lore.size() - 2, lore.size()).clear();
+            }
+            meta.lore(lore);
+            item.setItemMeta(meta);
+        }
+        return stamp(item, skill, slot, owner, bound);
     }
 }

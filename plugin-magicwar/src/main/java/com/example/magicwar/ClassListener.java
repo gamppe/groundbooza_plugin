@@ -86,6 +86,10 @@ public class ClassListener implements Listener {
             player.sendActionBar(Component.text("아레나에서만 사용할 수 있습니다.", NamedTextColor.RED));
             return;
         }
+        if (effects.isSilenced(player)) {
+            player.sendActionBar(Component.text("얼음에 갇혀 주문을 쓸 수 없습니다.", NamedTextColor.RED));
+            return;
+        }
         // The second half of a two-step skill rides on the first cast's cooldown, so it is let
         // through untouched - otherwise the follow-up window would always be shut.
         boolean followUp = effects.isFollowUp(player, skill);
