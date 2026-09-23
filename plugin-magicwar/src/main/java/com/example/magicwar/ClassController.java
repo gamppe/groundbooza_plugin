@@ -23,14 +23,19 @@ public class ClassController {
     private final QuestManager quests;
     private final ClassGuideItem guide;
     private final SkillItem skills;
+    private final Perks perks;
+    private final StrengthPotionItem potions;
 
     public ClassController(MagicWarPlugin plugin, ClassManager classes, QuestManager quests,
-                           ClassGuideItem guide, SkillItem skills) {
+                           ClassGuideItem guide, SkillItem skills, Perks perks,
+                           StrengthPotionItem potions) {
         this.plugin = plugin;
         this.classes = classes;
         this.quests = quests;
         this.guide = guide;
         this.skills = skills;
+        this.perks = perks;
+        this.potions = potions;
     }
 
     /** The guide, /클래스 and the round start all come through here: picker first, board once a
@@ -81,6 +86,7 @@ public class ClassController {
             lore.add(base.label() + " 의 2차 클래스");
             lore.add("");
             lore.add("두번째 스킬: " + option.skill().name());
+            lore.add("전직 보너스: " + option.bonus().text());
             lore.add("");
             lore.add(option.quest().display() + " ("
                     + quests.count(player.getUniqueId(), option.quest()) + "/" + option.quest().target() + ")");
@@ -127,6 +133,7 @@ public class ClassController {
             return;
         }
         classes.advance(uuid, picked);
+        award(player, picked.bonus());
         guide.refresh(player, classes.displayName(uuid));
         player.getInventory().addItem(skills.create(picked.skill(),
                 base.skills().size(), picked.label()));
@@ -135,6 +142,7 @@ public class ClassController {
         player.playSound(player, Sound.UI_TOAST_CHALLENGE_COMPLETE, 1f, 1f);
         player.sendMessage(Component.text(picked.label() + " (으)로 전직했습니다! 두번째 스킬을 얻었습니다.",
                 NamedTextColor.LIGHT_PURPLE));
+        player.sendMessage(Component.text("전직 보너스: " + picked.bonus().text(), NamedTextColor.LIGHT_PURPLE));
         Bukkit.getScheduler().runTask(plugin, () -> openBoard(player));
     }
 
@@ -166,7 +174,7 @@ public class ClassController {
                 classes.hasAdvanced(uuid) ? classes.advancementOf(uuid).icon() : magicClass.icon(),
                 classes.displayName(uuid), NamedTextColor.GOLD, List.of(magicClass.blurb())));
 
-        List<Quest> board = QuestManager.boardFor(magicClass);
+        List<Quest> board = QuestManager.boardFor(magicClass, classes.advancementOf(uuid));
         for (int i = 0; i < board.size(); i++) {
             Quest quest = board.get(i);
             inv.setItem(ClassUpgradeHolder.questSlot(i), questIcon(uuid, quest));
@@ -251,11 +259,15 @@ public class ClassController {
      * even though the wool is what changes colour. */
     public void claim(Player player, int index) {
         UUID uuid = player.getUniqueId();
-        List<Quest> board = QuestManager.boardFor(classes.classOf(uuid));
+        List<Quest> board = QuestManager.boardFor(classes.classOf(uuid), classes.advancementOf(uuid));
         if (index < 0 || index >= board.size()) {
             return;
         }
         Quest quest = board.get(index);
+        if (quest.isPlaceholder()) {
+            player.sendMessage(Component.text("아직 준비되지 않은 퀘스트입니다.", NamedTextColor.DARK_GRAY));
+            return;
+        }
         if (!quests.isComplete(uuid, quest)) {
             player.sendMessage(Component.text("아직 완료하지 않은 퀘스트입니다. ("
                     + quests.count(uuid, quest) + "/" + quest.target() + ")", NamedTextColor.RED));
@@ -265,9 +277,19 @@ public class ClassController {
             player.sendMessage(Component.text("이미 보상을 받았습니다.", NamedTextColor.RED));
             return;
         }
-        player.sendMessage(Component.text("보상 획득: " + quest.reward(), NamedTextColor.GREEN));
+        award(player, quest.reward());
+        player.sendMessage(Component.text("보상 획득: " + quest.reward().text(), NamedTextColor.GREEN));
         player.playSound(player, Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1f, 1f);
         openBoard(player);
+    }
+
+    /** Hands over one reward: the stats go into {@link Perks}, and the one reward that is an
+     * item is handed over here rather than there, so Perks stays about numbers. */
+    private void award(Player player, Reward reward) {
+        perks.grant(player, reward);
+        if (reward.grants().containsKey(Perks.STRENGTH_POTION)) {
+            player.getInventory().addItem(potions.create());
+        }
     }
 
     // ---------- icons ----------
@@ -277,7 +299,7 @@ public class ClassController {
         boolean done = count >= quest.target();
         List<String> lore = new ArrayList<>();
         lore.add("진행도: " + count + " / " + quest.target());
-        lore.add("보상: " + quest.reward());
+        lore.add("보상: " + quest.reward().text());
         lore.add("");
         lore.add(done ? (quests.isClaimed(uuid, quest) ? "보상을 받았습니다" : "클릭하여 보상 획득") : "진행 중");
         ItemStack item = icon(quest.icon(), quest.display(), quest.color(), lore);
@@ -297,7 +319,7 @@ public class ClassController {
         Material wool = claimed ? Material.GRAY_WOOL : done ? Material.LIME_WOOL : Material.RED_WOOL;
         String name = claimed ? "보상 획득 완료" : done ? "클릭하여 보상 획득" : "진행 " + count + " / " + quest.target();
         NamedTextColor color = claimed ? NamedTextColor.DARK_GRAY : done ? NamedTextColor.GREEN : NamedTextColor.RED;
-        return icon(wool, name, color, List.of(quest.display(), "보상: " + quest.reward()));
+        return icon(wool, name, color, List.of(quest.display(), "보상: " + quest.reward().text()));
     }
 
     private ItemStack advanceIcon(UUID uuid, MagicClass magicClass) {

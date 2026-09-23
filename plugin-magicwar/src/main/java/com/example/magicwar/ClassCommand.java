@@ -24,13 +24,15 @@ public class ClassCommand implements CommandExecutor, TabCompleter {
     private final ClassManager classes;
     private final QuestManager quests;
     private final SkillCooldowns cooldowns;
+    private final Perks perks;
 
     public ClassCommand(ClassController controller, ClassManager classes, QuestManager quests,
-                        SkillCooldowns cooldowns) {
+                        SkillCooldowns cooldowns, Perks perks) {
         this.controller = controller;
         this.classes = classes;
         this.quests = quests;
         this.cooldowns = cooldowns;
+        this.perks = perks;
     }
 
     @Override
@@ -62,6 +64,7 @@ public class ClassCommand implements CommandExecutor, TabCompleter {
         classes.reset(player.getUniqueId());
         quests.reset(player.getUniqueId());
         cooldowns.reset(player.getUniqueId());
+        perks.reset(player);
         player.sendMessage(Component.text("클래스와 퀘스트 진행도를 초기화했습니다.", NamedTextColor.YELLOW));
         controller.openSelect(player);
     }
@@ -72,7 +75,8 @@ public class ClassCommand implements CommandExecutor, TabCompleter {
             player.sendMessage(Component.text("먼저 클래스를 선택하세요.", NamedTextColor.RED));
             return;
         }
-        QuestManager.boardFor(magicClass).forEach(quest -> quests.complete(player.getUniqueId(), quest));
+        QuestManager.boardFor(magicClass, classes.advancementOf(player.getUniqueId()))
+                .forEach(quest -> quests.complete(player.getUniqueId(), quest));
         player.sendMessage(Component.text("모든 퀘스트를 완료 처리했습니다.", NamedTextColor.YELLOW));
         controller.openBoard(player);
     }

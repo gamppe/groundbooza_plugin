@@ -74,6 +74,19 @@ public class Summons {
         return summonIds.contains(entity.getUniqueId());
     }
 
+    /** Whose summon this is, or null when it is nobody's. */
+    public UUID ownerOf(Entity entity) {
+        if (!summonIds.contains(entity.getUniqueId())) {
+            return null;
+        }
+        for (Summon summon : summons) {
+            if (summon.mob.getUniqueId().equals(entity.getUniqueId())) {
+                return summon.casterId;
+            }
+        }
+        return null;
+    }
+
     /** This caster's live summons of one kind. */
     public List<Mob> of(Player caster, Kind kind) {
         List<Mob> mine = new ArrayList<>();

@@ -1,0 +1,111 @@
+package com.example.magicwar;
+
+import org.bukkit.Bukkit;
+import org.bukkit.entity.EntityCategory;
+import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Mob;
+import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityDeathEvent;
+import org.bukkit.event.entity.EntityTargetLivingEntityEvent;
+import org.bukkit.projectiles.ProjectileSource;
+
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * The side of {@link Perks} that only shows up when something happens: extra damage, the two
+ * immunities that come with a 전직, and the shield a 드루이드 gets back for a lost summon.
+ *
+ * <p>Damage is added at {@link EventPriority#HIGH} so it lands on top of whatever armour and
+ * enchantments worked out, and it covers melee, arrows and spells alike - a spell damages
+ * through {@code damage(amount, caster)}, which arrives here as the caster hitting the victim,
+ * exactly as a sword swing would.
+ */
+public class PerkListener implements Listener {
+
+    private static final Set<EntityDamageEvent.DamageCause> FIRE_CAUSES = Set.of(
+            EntityDamageEvent.DamageCause.FIRE,
+            EntityDamageEvent.DamageCause.FIRE_TICK,
+            EntityDamageEvent.DamageCause.LAVA,
+            EntityDamageEvent.DamageCause.HOT_FLOOR,
+            EntityDamageEvent.DamageCause.CAMPFIRE);
+
+    private final Perks perks;
+    private final Summons summons;
+
+    public PerkListener(Perks perks, Summons summons) {
+        this.perks = perks;
+        this.summons = summons;
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onDamageDealt(EntityDamageByEntityEvent event) {
+        Player attacker = attacker(event);
+        if (attacker == null || attacker.equals(event.getEntity())) {
+            return;
+        }
+        double bonus = perks.amount(attacker.getUniqueId(), Perks.DAMAGE);
+        if (bonus > 0) {
+            event.setDamage(event.getDamage() + bonus);
+        }
+    }
+
+    /** The player behind the blow: the damager itself, or whoever loosed the projectile. A
+     * summon is nobody - the bonus is for what the player does with their own hands. */
+    private static Player attacker(EntityDamageByEntityEvent event) {
+        if (event.getDamager() instanceof Player player) {
+            return player;
+        }
+        if (event.getDamager() instanceof Projectile projectile) {
+            ProjectileSource shooter = projectile.getShooter();
+            return shooter instanceof Player player ? player : null;
+        }
+        return null;
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onFire(EntityDamageEvent event) {
+        if (event.getEntity() instanceof Player player
+                && FIRE_CAUSES.contains(event.getCause())
+                && perks.has(player.getUniqueId(), Perks.FIRE_IMMUNE)) {
+            event.setCancelled(true);
+            player.setFireTicks(0);
+        }
+    }
+
+    /** 네크로맨서: the ordinary undead lose interest. Anything a player pointed at them still
+     * fights back - this only stops them picking the target themselves. */
+    @EventHandler(ignoreCancelled = true)
+    public void onTarget(EntityTargetLivingEntityEvent event) {
+        if (!(event.getTarget() instanceof Player player)
+                || !(event.getEntity() instanceof LivingEntity mob)
+                || mob.getCategory() != EntityCategory.UNDEAD) {
+            return;
+        }
+        if (perks.has(player.getUniqueId(), Perks.UNDEAD_PEACE)) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onSummonDeath(EntityDeathEvent event) {
+        if (!(event.getEntity() instanceof Mob mob)) {
+            return;
+        }
+        UUID owner = summons.ownerOf(mob);
+        if (owner == null) {
+            return;
+        }
+        Player player = Bukkit.getPlayer(owner);
+        double refill = player == null ? 0 : perks.amount(owner, Perks.SHIELD_REFILL);
+        if (refill > 0) {
+            perks.refillShield(player, refill);
+        }
+    }
+}

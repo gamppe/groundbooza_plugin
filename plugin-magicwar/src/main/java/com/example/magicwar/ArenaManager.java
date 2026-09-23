@@ -401,6 +401,9 @@ public class ArenaManager {
     private void clearEverything(Player player) {
         player.getInventory().clear();
         player.setItemOnCursor(null);
+        // Rewards are per-match too, and they live on the player as attributes - forgetting
+        // them without stripping them would leave last round's hearts behind.
+        plugin.getPerks().reset(player);
     }
 
     /** Starting gear, plus the class picker for anyone who has not chosen yet. The picker is
@@ -463,10 +466,12 @@ public class ArenaManager {
         plugin.getSummons().clear();
         for (Player player : Bukkit.getOnlinePlayers()) {
             player.setInvulnerable(false);
+            plugin.getPerks().reset(player);
             if (!isLobby(player.getWorld())) {
                 sendToLobby(player);
             }
         }
+        plugin.getPerks().clear(); // whatever the offline players had earned
         if (arena == null) {
             return;
         }

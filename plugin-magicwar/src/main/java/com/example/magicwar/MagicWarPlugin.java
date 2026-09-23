@@ -20,6 +20,8 @@ public class MagicWarPlugin extends JavaPlugin {
     private FrostState frostState;
     private TempBlocks tempBlocks;
     private Summons summons;
+    private Perks perks;
+    private QuestTracker questTracker;
     private ClassController classController;
 
     @Override
@@ -31,14 +33,19 @@ public class MagicWarPlugin extends JavaPlugin {
         this.questManager = new QuestManager();
         this.classGuideItem = new ClassGuideItem(this);
         this.skillItem = new SkillItem(this);
-        this.skillCooldowns = new SkillCooldowns();
         this.tempBlocks = new TempBlocks();
         this.summons = new Summons();
+        this.perks = new Perks(this);
+        this.skillCooldowns = new SkillCooldowns(perks);
+        StrengthPotionItem strengthPotion = new StrengthPotionItem(this);
         SkillPreview skillPreview = new SkillPreview(this);
-        this.frostState = new FrostState(this, tempBlocks);
-        SkillEffects skillEffects = new SkillEffects(this, classManager, skillCooldowns, frostState, tempBlocks, skillItem, skillPreview, summons);
+        this.frostState = new FrostState(this, tempBlocks, perks);
+        // The arena has to exist before the tracker, which asks it whether a round is on, and
+        // the tracker before the skills, which report into it.
         this.arenaManager = new ArenaManager(this, new RoundSettings(config), classManager, questManager, classGuideItem);
-        this.classController = new ClassController(this, classManager, questManager, classGuideItem, skillItem);
+        this.questTracker = new QuestTracker(arenaManager, classManager, questManager);
+        SkillEffects skillEffects = new SkillEffects(this, classManager, skillCooldowns, frostState, tempBlocks, skillItem, skillPreview, summons, perks, questTracker);
+        this.classController = new ClassController(this, classManager, questManager, classGuideItem, skillItem, perks, strengthPotion);
         arenaManager.setClassController(classController);
 
         // A crash or a /stop mid-round leaves the last arena on disk; nothing holds it open
@@ -50,7 +57,7 @@ public class MagicWarPlugin extends JavaPlugin {
         getCommand("마법전쟁").setExecutor(command);
         getCommand("마법전쟁").setTabCompleter(command);
         getServer().getPluginManager().registerEvents(new LobbyListener(arenaManager), this);
-        ClassCommand classCommand = new ClassCommand(classController, classManager, questManager, skillCooldowns);
+        ClassCommand classCommand = new ClassCommand(classController, classManager, questManager, skillCooldowns, perks);
         getCommand("클래스").setExecutor(classCommand);
         getCommand("클래스").setTabCompleter(classCommand);
         getServer().getPluginManager().registerEvents(
@@ -58,13 +65,15 @@ public class MagicWarPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(skillEffects, this);
         getServer().getPluginManager().registerEvents(frostState, this);
         getServer().getPluginManager().registerEvents(skillPreview, this);
+        getServer().getPluginManager().registerEvents(strengthPotion, this);
+        getServer().getPluginManager().registerEvents(new PerkListener(perks, summons), this);
         getServer().getScheduler().runTaskTimer(this, frostState::tick, 1L, 1L);
         getServer().getScheduler().runTaskTimer(this, tempBlocks::tick, 1L, 1L);
         getServer().getScheduler().runTaskTimer(this, summons::tick, 1L, 1L);
         getServer().getScheduler().runTaskTimer(this, skillCooldowns::tick, 1L, 1L);
         getServer().getScheduler().runTaskTimer(this, skillEffects::tick, 1L, 1L);
         this.skillEffects = skillEffects;
-        getServer().getPluginManager().registerEvents(new QuestListener(arenaManager, classManager, questManager), this);
+        getServer().getPluginManager().registerEvents(new QuestListener(questTracker, summons), this);
         MagicWarScoreboard scoreboard = new MagicWarScoreboard(arenaManager, classManager, questManager);
         getServer().getScheduler().runTaskTimer(this, scoreboard::tick, 20L, 20L);
 
@@ -104,5 +113,13 @@ public class MagicWarPlugin extends JavaPlugin {
 
     public Summons getSummons() {
         return summons;
+    }
+
+    public Perks getPerks() {
+        return perks;
+    }
+
+    public QuestTracker getQuestTracker() {
+        return questTracker;
     }
 }

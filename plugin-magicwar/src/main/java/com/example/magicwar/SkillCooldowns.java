@@ -22,6 +22,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>Charges work the same way: vanilla has no notion of them, so the count is kept here and
  * refilled one per cooldown. For those the sweep is a refill timer rather than a lockout - it
  * runs whenever anything is still coming back, even with charges in hand.
+ *
+ * <p>Neither figure is read off the skill directly: a quest reward can shorten a cooldown or
+ * add a charge, so both go through {@link Perks} and can change mid-round. A skill that gains
+ * a charge that way gets it handed over at once rather than having to earn it back.
  */
 public class SkillCooldowns {
 
@@ -43,38 +47,58 @@ public class SkillCooldowns {
     }
 
     private final Map<UUID, Map<String, State>> states = new ConcurrentHashMap<>();
+    private final Perks perks;
+
+    public SkillCooldowns(Perks perks) {
+        this.perks = perks;
+    }
 
     private State of(Player player, ClassSkill skill) {
         State state = states.computeIfAbsent(player.getUniqueId(), u -> new HashMap<>())
-                .computeIfAbsent(skill.id(), id -> new State(skill.charges()));
+                .computeIfAbsent(skill.id(), id -> new State(charges(player, skill)));
         state.skill = skill;
         return state;
     }
 
-    /** Hands back any charges that have come due since the last look. */
-    private void refill(State state, ClassSkill skill) {
-        if (state.charges >= skill.charges()) {
+    private int charges(Player player, ClassSkill skill) {
+        return perks.chargesFor(player.getUniqueId(), skill);
+    }
+
+    private long cooldownMillis(Player player, ClassSkill skill) {
+        return perks.cooldownFor(player.getUniqueId(), skill) * 1000L;
+    }
+
+    /** Hands back any charges that have come due since the last look. A reward that raised the
+     * cap while the skill sat full shows up here as a charge already due. */
+    private void refill(Player player, State state, ClassSkill skill) {
+        int cap = charges(player, skill);
+        if (state.charges >= cap) {
+            state.charges = cap;
             state.nextRefillMillis = 0;
             return;
         }
+        if (state.nextRefillMillis == 0) {
+            state.charges = cap; // the cap went up while nothing was on cooldown
+            return;
+        }
         long now = System.currentTimeMillis();
-        long step = skill.cooldownSeconds() * 1000L;
-        while (state.charges < skill.charges() && state.nextRefillMillis != 0 && now >= state.nextRefillMillis) {
+        long step = cooldownMillis(player, skill);
+        while (state.charges < cap && state.nextRefillMillis != 0 && now >= state.nextRefillMillis) {
             state.charges++;
-            state.nextRefillMillis = state.charges >= skill.charges() ? 0 : state.nextRefillMillis + step;
+            state.nextRefillMillis = state.charges >= cap ? 0 : state.nextRefillMillis + step;
         }
     }
 
     public boolean ready(Player player, ClassSkill skill) {
         State state = of(player, skill);
-        refill(state, skill);
+        refill(player, state, skill);
         return state.charges > 0;
     }
 
     /** Seconds until the skill can be cast again - for the "쿨타임 N초" line. */
     public int secondsLeft(Player player, ClassSkill skill) {
         State state = of(player, skill);
-        refill(state, skill);
+        refill(player, state, skill);
         if (state.nextRefillMillis == 0) {
             return 0;
         }
@@ -84,13 +108,13 @@ public class SkillCooldowns {
     /** Spends one cast. @return charges left, or -1 for a skill that does not use them. */
     public int consume(Player player, ClassSkill skill) {
         State state = of(player, skill);
-        refill(state, skill);
+        refill(player, state, skill);
         state.charges--;
         if (state.nextRefillMillis == 0) {
-            state.nextRefillMillis = System.currentTimeMillis() + skill.cooldownSeconds() * 1000L;
+            state.nextRefillMillis = System.currentTimeMillis() + cooldownMillis(player, skill);
         }
         draw(player, skill, state);
-        return skill.charges() <= 1 ? -1 : state.charges;
+        return charges(player, skill) <= 1 ? -1 : state.charges;
     }
 
     /**
@@ -113,7 +137,7 @@ public class SkillCooldowns {
         State state = of(player, skill);
         state.suspended = false;
         state.suspendedDisplayTicks = 0;
-        refill(state, skill);
+        refill(player, state, skill);
         draw(player, skill, state);
     }
 
@@ -150,14 +174,15 @@ public class SkillCooldowns {
                     continue;
                 }
                 int before = state.charges;
-                refill(state, state.skill);
+                refill(player, state, state.skill);
                 if (state.charges == before) {
                     continue;
                 }
                 draw(player, state.skill, state);
-                if (state.skill.charges() > 1) {
+                int cap = charges(player, state.skill);
+                if (cap > 1) {
                     player.sendActionBar(Component.text(state.skill.name()
-                            + " (" + state.charges + "/" + state.skill.charges() + ")", NamedTextColor.AQUA));
+                            + " (" + state.charges + "/" + cap + ")", NamedTextColor.AQUA));
                 }
             }
         }
@@ -171,7 +196,7 @@ public class SkillCooldowns {
             return; // already full, nothing to bring forward
         }
         state.nextRefillMillis = Math.max(System.currentTimeMillis(), state.nextRefillMillis - millis);
-        refill(state, skill);
+        refill(player, state, skill);
         draw(player, skill, state);
     }
 

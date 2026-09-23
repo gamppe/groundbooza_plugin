@@ -17,12 +17,15 @@ import org.bukkit.entity.BreezeWindCharge;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
+import org.bukkit.entity.Monster;
 import org.bukkit.entity.Pig;
 import org.bukkit.entity.PigZombie;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
+import org.bukkit.entity.Silverfish;
 import org.bukkit.entity.SmallFireball;
 import org.bukkit.entity.Wolf;
+import org.bukkit.entity.Zoglin;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
@@ -33,6 +36,7 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
@@ -156,6 +160,18 @@ public class SkillEffects implements Listener {
     /** Each lava block is only there for a moment, so the column reads as a spout. */
     private static final int ERUPTION_LAVA_TICKS = 20;
 
+    /** 일렉트로맨서 퀘스트: what counts as a long shot, and how close together two of them
+     * have to land. */
+    private static final double BOLT_SNIPE_RANGE = 40;
+    private static final long BOLT_SNIPE_WINDOW_MILLIS = 1000;
+    /** Extra bolts a 볼트마법 with 3갈래 throws, and how far off-axis they go. */
+    private static final double BOLT_SPLIT_SPREAD = 0.12;
+    /** 네크로맨서 퀘스트 rewards: the odds, and how long what they raise sticks around. */
+    private static final double NECRO_SILVERFISH_CHANCE = 0.5;
+    private static final double NECRO_ZOGLIN_CHANCE = 0.2;
+    private static final int NECRO_SPAWN_TICKS = 10 * 20;
+    private static final int TRACK_BUFF_TICKS = 20 * 20;
+
     private static final int DUST_RING_POINTS = 16;
     private static final double DUST_RING_RADIUS = 2.2;
 
@@ -178,6 +194,8 @@ public class SkillEffects implements Listener {
     private final SkillItem skillItems;
     private final SkillPreview preview;
     private final Summons summons;
+    private final Perks perks;
+    private final QuestTracker tracker;
     /** Players 흔적 추적 has already given away, per caster - one report each. */
     private final Map<UUID, Set<UUID>> tracked = new HashMap<>();
     private final NamespacedKey waveShotKey;
@@ -190,10 +208,13 @@ public class SkillEffects implements Listener {
     private final Map<UUID, Shock> shocks = new HashMap<>();
     /** Players mid-뇌격, exempt from fall damage until shortly after they touch down. */
     private final Set<UUID> noFall = new HashSet<>();
+    /** When each caster last landed a 볼트마법 from a long way off - for the sniper quest. */
+    private final Map<UUID, Long> lastLongBolt = new HashMap<>();
 
     public SkillEffects(MagicWarPlugin plugin, ClassManager classes, SkillCooldowns cooldowns,
                         FrostState frost, TempBlocks tempBlocks, SkillItem skillItems,
-                        SkillPreview preview, Summons summons) {
+                        SkillPreview preview, Summons summons, Perks perks,
+                        QuestTracker tracker) {
         this.plugin = plugin;
         this.classes = classes;
         this.cooldowns = cooldowns;
@@ -202,6 +223,8 @@ public class SkillEffects implements Listener {
         this.skillItems = skillItems;
         this.preview = preview;
         this.summons = summons;
+        this.perks = perks;
+        this.tracker = tracker;
         this.waveShotKey = new NamespacedKey(plugin, "wave_shot");
         this.boltKey = new NamespacedKey(plugin, "bolt");
         this.summonedPigKey = new NamespacedKey(plugin, "summoned_pig");
@@ -220,7 +243,7 @@ public class SkillEffects implements Listener {
     /** @return false when the skill could not be cast after all, so the caller can skip the
      * cooldown. */
     public boolean cast(Player player, ClassSkill skill) {
-        return switch (skill.id()) {
+        boolean fired = switch (skill.id()) {
             case "wave_shot" -> waveShot(player);
             case "bolt" -> bolt(player);
             case "pig_burst" -> pigBurst(player);
@@ -232,6 +255,18 @@ public class SkillEffects implements Listener {
             case "track" -> track(player);
             default -> placeholder(player, skill);
         };
+        if (fired) {
+            tracker.fire(player, Quest.Goal.SKILL_CAST, skill.id());
+        }
+        return fired;
+    }
+
+    private int perk(Player player, String key) {
+        return perks.level(player.getUniqueId(), key);
+    }
+
+    private boolean hasPerk(Player player, String key) {
+        return perks.has(player.getUniqueId(), key);
     }
 
     /** Hide or restore the sweep on whichever item carries this skill. Silent when the player
@@ -276,8 +311,28 @@ public class SkillEffects implements Listener {
      * is set the pack on them, so that is done explicitly.
      */
     private void hurt(Player caster, LivingEntity victim, double amount) {
+        hurt(caster, victim, amount, null);
+    }
+
+    /**
+     * @param skillId the spell that dealt it, for the quests counted by spell. What is reported
+     *                is the health actually lost rather than the figure asked for, so a target
+     *                in its invulnerability frames or behind a shield does not pay out.
+     */
+    private void hurt(Player caster, LivingEntity victim, double amount, String skillId) {
+        double before = victim.getHealth() + victim.getAbsorptionAmount();
         victim.damage(amount, caster);
         summons.rally(caster, victim);
+        if (skillId == null) {
+            return;
+        }
+        int dealt = (int) Math.round(before - (victim.getHealth() + victim.getAbsorptionAmount()));
+        tracker.fire(caster, Quest.Goal.SKILL_DAMAGE, skillId, dealt);
+        // The death event has already run by the time damage() returns, so this is the one
+        // place that knows which spell finished the job.
+        if (victim.isDead() && victim instanceof Monster) {
+            tracker.fire(caster, Quest.Goal.KILL_SKILL_HOSTILE, skillId);
+        }
     }
 
     private boolean isNecromancer(Player player) {
@@ -340,7 +395,8 @@ public class SkillEffects implements Listener {
         if (hit instanceof LivingEntity target && !target.equals(shooter)) {
             event.setCancelled(true);
             projectile.remove();
-            hurt(shooter, target, monk ? WAVE_SHOT_MONK_DAMAGE : WAVE_SHOT_DAMAGE);
+            hurt(shooter, target, monk ? WAVE_SHOT_MONK_DAMAGE : WAVE_SHOT_DAMAGE, "wave_shot");
+            tracker.fire(shooter, Quest.Goal.SKILL_MULTI, "wave_shot", 1);
             Vector push = target.getLocation().toVector().subtract(shooter.getLocation().toVector());
             if (push.lengthSquared() < 1.0E-4) {
                 push = shooter.getEyeLocation().getDirection();
@@ -355,12 +411,15 @@ public class SkillEffects implements Listener {
                 if (wasFrostbitten) {
                     icePrison(shooter, target);
                 } else {
-                    frost.applyFrostbite(target, FROSTBITE_SECONDS);
+                    applyFrostbite(shooter, target);
                     target.getWorld().spawnParticle(Particle.SNOWFLAKE, target.getLocation().add(0, 1, 0),
                             25, 0.4, 0.6, 0.4, 0.02);
                 }
             } else if (monk) {
                 markBlink(shooter, target);
+                if (hasPerk(shooter, Perks.WAVE_SHOT_SPEED)) {
+                    shooter.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 10 * 20, 0));
+                }
             }
             return;
         }
@@ -415,7 +474,7 @@ public class SkillEffects implements Listener {
 
         for (Entity nearby : player.getNearbyEntities(BLINK_RADIUS, BLINK_RADIUS, BLINK_RADIUS)) {
             if (nearby instanceof LivingEntity victim && !victim.equals(player)) {
-                hurt(player, victim, BLINK_DAMAGE);
+                hurt(player, victim, BLINK_DAMAGE, "wave_shot");
             }
         }
         target.getWorld().spawnParticle(Particle.SWEEP_ATTACK, target.clone().add(0, 1, 0), 8, 1.0, 0.5, 1.0);
@@ -552,12 +611,26 @@ public class SkillEffects implements Listener {
         at.getWorld().playSound(at, Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 1f, 1.2f);
         kickUpDust(at);
 
-        for (Entity nearby : player.getNearbyEntities(THUNDER_LAND_RADIUS, THUNDER_LAND_RADIUS, THUNDER_LAND_RADIUS)) {
+        double radius = THUNDER_LAND_RADIUS + perk(player, Perks.THUNDER_RADIUS);
+        int hits = 0;
+        for (Entity nearby : player.getNearbyEntities(radius, radius, radius)) {
             if (nearby instanceof LivingEntity victim && !victim.equals(player)) {
-                hurt(player, victim, THUNDER_LAND_DAMAGE);
+                hurt(player, victim, THUNDER_LAND_DAMAGE, "thunder_strike");
                 victim.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, THUNDER_SLOW_TICKS, 1));
                 victim.getWorld().strikeLightningEffect(victim.getLocation());
+                hits++;
             }
+        }
+        tracker.fire(player, Quest.Goal.SKILL_MULTI, "thunder_strike", hits);
+    }
+
+    /** One place to freeze something, so the quest cannot be told about a state that was
+     * already on. */
+    private void applyFrostbite(Player caster, LivingEntity target) {
+        boolean fresh = !frost.isFrostbitten(target);
+        frost.applyFrostbite(caster, target, FROSTBITE_SECONDS);
+        if (fresh) {
+            tracker.fire(caster, Quest.Goal.FROST_APPLY, null);
         }
     }
 
@@ -607,6 +680,8 @@ public class SkillEffects implements Listener {
         frost.silence(target.getUniqueId(), ICE_PRISON_TICKS);
         target.getWorld().playSound(centre, Sound.BLOCK_GLASS_PLACE, 1.2f, 0.6f);
 
+        tracker.fire(caster, Quest.Goal.ICE_TRAP, null);
+
         UUID targetId = target.getUniqueId();
         Bukkit.getScheduler().runTaskLater(plugin, () -> shatterPrison(caster, targetId, centre), ICE_PRISON_TICKS);
     }
@@ -617,7 +692,7 @@ public class SkillEffects implements Listener {
                 Material.ICE.createBlockData());
         Entity sealed = Bukkit.getEntity(targetId);
         if (sealed instanceof LivingEntity alive && alive.isValid()) {
-            hurt(caster, alive, ICE_PRISON_DAMAGE);
+            hurt(caster, alive, ICE_PRISON_DAMAGE + perk(caster, Perks.ICE_PRISON_DAMAGE), "wave_shot");
             frost.clearFrostbite(alive);
         }
     }
@@ -629,7 +704,8 @@ public class SkillEffects implements Listener {
      * place is not hit again by the same line. */
     /** Every block an 얼음송곳 cast would cover: each arm walking outward exactly as
      * growSpikeLine does. Shared with the marker so the two cannot drift. */
-    private List<Block> spikeFootprint(Location origin) {
+    private List<Block> spikeFootprint(Player caster, Location origin) {
+        int halfWidth = ICE_SPIKE_HALF_WIDTH + perk(caster, Perks.ICE_SPIKE_WIDE);
         List<Block> blocks = new ArrayList<>();
         for (int i = 0; i < ICE_SPIKE_DIRECTIONS; i++) {
             double angle = Math.PI * 2 * i / ICE_SPIKE_DIRECTIONS;
@@ -640,7 +716,7 @@ public class SkillEffects implements Listener {
                 int centreX = origin.getBlockX() + (int) Math.round(dx * step);
                 int centreZ = origin.getBlockZ() + (int) Math.round(dz * step);
                 boolean placedAny = false;
-                for (int off = -ICE_SPIKE_HALF_WIDTH; off <= ICE_SPIKE_HALF_WIDTH; off++) {
+                for (int off = -halfWidth; off <= halfWidth; off++) {
                     int x = centreX + (int) Math.round(-dz * off);
                     int z = centreZ + (int) Math.round(dx * off);
                     Block surface = frost.surfaceAt(origin, x, z, lastY);
@@ -665,14 +741,18 @@ public class SkillEffects implements Listener {
         Location origin = player.getLocation().clone();
         preview.hide(player.getUniqueId());
         player.getWorld().playSound(origin, Sound.BLOCK_GLASS_BREAK, 1.4f, 0.5f);
+        // Shared across all eight arms: one cast that catches three mobs is three, whichever
+        // arms reached them and however many ticks apart.
+        Set<UUID> caught = new HashSet<>();
         for (int i = 0; i < ICE_SPIKE_DIRECTIONS; i++) {
             double angle = Math.PI * 2 * i / ICE_SPIKE_DIRECTIONS;
-            growSpikeLine(player, origin, Math.cos(angle), Math.sin(angle));
+            growSpikeLine(player, origin, Math.cos(angle), Math.sin(angle), caught);
         }
         return true;
     }
 
-    private void growSpikeLine(Player caster, Location origin, double dx, double dz) {
+    private void growSpikeLine(Player caster, Location origin, double dx, double dz, Set<UUID> caught) {
+        int halfWidth = ICE_SPIKE_HALF_WIDTH + perk(caster, Perks.ICE_SPIKE_WIDE);
         Set<UUID> alreadyHit = new HashSet<>();
         new BukkitRunnable() {
             int step = 1;
@@ -691,7 +771,7 @@ public class SkillEffects implements Listener {
                 double perpX = -dz;
                 double perpZ = dx;
                 boolean placedAny = false;
-                for (int off = -ICE_SPIKE_HALF_WIDTH; off <= ICE_SPIKE_HALF_WIDTH; off++) {
+                for (int off = -halfWidth; off <= halfWidth; off++) {
                     int x = centreX + (int) Math.round(perpX * off);
                     int z = centreZ + (int) Math.round(perpZ * off);
                     Block surface = frost.surfaceAt(origin, x, z, lastY);
@@ -712,8 +792,10 @@ public class SkillEffects implements Listener {
                                 || !alreadyHit.add(victim.getUniqueId())) {
                             continue;
                         }
-                        hurt(caster, victim, ICE_SPIKE_DAMAGE);
-                        frost.applyFrostbite(victim, FROSTBITE_SECONDS);
+                        hurt(caster, victim, ICE_SPIKE_DAMAGE, "ice_spike");
+                        applyFrostbite(caster, victim);
+                        caught.add(victim.getUniqueId());
+                        tracker.fire(caster, Quest.Goal.SKILL_MULTI, "ice_spike", caught.size());
                     }
                 }
                 if (!placedAny) {
@@ -721,24 +803,6 @@ public class SkillEffects implements Listener {
                 }
             }
         }.runTaskTimer(plugin, 0L, ICE_SPIKE_STEP_TICKS);
-    }
-
-    // ---------- 파이로맨서 : 불에 데지 않는 몸 ----------
-
-    /** The passive. Anything hot simply does not apply - fire, lava, and the magma block the
-     * eruption stands on. */
-    @EventHandler(ignoreCancelled = true)
-    public void onBurn(EntityDamageEvent event) {
-        if (!(event.getEntity() instanceof Player player) || !isPyromancer(player)) {
-            return;
-        }
-        switch (event.getCause()) {
-            case FIRE, FIRE_TICK, LAVA, HOT_FLOOR -> {
-                event.setCancelled(true);
-                player.setFireTicks(0);
-            }
-            default -> { }
-        }
     }
 
     // ---------- 파이로맨서 2 : 용암분출 ----------
@@ -749,12 +813,14 @@ public class SkillEffects implements Listener {
         return hit == null ? null : hit.getHitBlock();
     }
 
-    /** The 7x7 circle centred on a block, following the surface so a slope is covered too. */
-    private List<Block> eruptionArea(Block centre) {
+    /** The circle centred on a block, following the surface so a slope is covered too. Seven
+     * across by default, wider for a 파이로맨서 who has earned it. */
+    private List<Block> eruptionArea(Player caster, Block centre) {
+        int radius = ERUPTION_RADIUS + perk(caster, Perks.ERUPTION_RADIUS);
         List<Block> area = new ArrayList<>();
-        for (int dx = -ERUPTION_RADIUS; dx <= ERUPTION_RADIUS; dx++) {
-            for (int dz = -ERUPTION_RADIUS; dz <= ERUPTION_RADIUS; dz++) {
-                if (dx * dx + dz * dz > (ERUPTION_RADIUS + 0.5) * (ERUPTION_RADIUS + 0.5)) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                if (dx * dx + dz * dz > (radius + 0.5) * (radius + 0.5)) {
                     continue; // round the square off
                 }
                 Block above = frost.surfaceAt(centre.getLocation(), centre.getX() + dx, centre.getZ() + dz,
@@ -780,12 +846,12 @@ public class SkillEffects implements Listener {
             List<Block> area;
             if (held.id().equals("lava_eruption")) {
                 anchor = eruptionTarget(player);
-                area = anchor == null ? List.of() : eruptionArea(anchor);
+                area = anchor == null ? List.of() : eruptionArea(player, anchor);
             } else {
                 // 얼음송곳 erupts from where the caster stands, so the shape only moves when
                 // they do - aiming around costs nothing.
                 anchor = player.getLocation().getBlock();
-                area = spikeFootprint(player.getLocation());
+                area = spikeFootprint(player, player.getLocation());
             }
             if (anchor == null || area.isEmpty()) {
                 preview.hide(player.getUniqueId());
@@ -813,7 +879,7 @@ public class SkillEffects implements Listener {
             player.sendActionBar(Component.text("땅을 바라보고 시전하세요.", NamedTextColor.RED));
             return false;
         }
-        List<Block> area = eruptionArea(target);
+        List<Block> area = eruptionArea(player, target);
         if (area.isEmpty()) {
             player.sendActionBar(Component.text("땅을 바라보고 시전하세요.", NamedTextColor.RED));
             return false;
@@ -880,13 +946,24 @@ public class SkillEffects implements Listener {
             return boltBeam(player);
         }
         launchBolt(player, "bolt");
+        // 3갈래: two more either side, close enough that a single target can take all three.
+        if (hasPerk(player, Perks.BOLT_SPLIT)) {
+            launchBolt(player, "bolt", BOLT_SPLIT_SPREAD);
+            launchBolt(player, "bolt", -BOLT_SPLIT_SPREAD);
+        }
         player.getWorld().playSound(player.getLocation(), Sound.ENTITY_BLAZE_SHOOT, 1f, 1.6f);
         return true;
     }
 
     /** @param skillId written onto the projectile, so the hit handler knows which skill to run. */
     private void launchBolt(Player player, String skillId) {
-        Vector direction = player.getEyeLocation().getDirection().normalize().multiply(BOLT_SPEED);
+        launchBolt(player, skillId, 0);
+    }
+
+    /** @param yaw radians off the line of sight, for the shots that go out in a fan. */
+    private void launchBolt(Player player, String skillId, double yaw) {
+        Vector direction = player.getEyeLocation().getDirection().normalize()
+                .rotateAroundY(yaw).multiply(BOLT_SPEED);
         player.launchProjectile(SmallFireball.class, direction, bolt -> {
             bolt.setIsIncendiary(false);
             bolt.setYield(0f);
@@ -912,6 +989,7 @@ public class SkillEffects implements Listener {
         }
         player.getWorld().playSound(eye, Sound.ENTITY_BREEZE_SHOOT, 1f, 2f);
 
+        int beamHits = 0;
         for (Entity nearby : player.getWorld().getNearbyEntities(eye, range, range, range)) {
             if (!(nearby instanceof LivingEntity victim) || victim.equals(player)) {
                 continue;
@@ -920,19 +998,37 @@ public class SkillEffects implements Listener {
                     eye.toVector(), direction, range) == null) {
                 continue;
             }
-            hurt(player, victim, BOLT_BEAM_DAMAGE);
-            root(victim);
-            addShock(victim);
+            hurt(player, victim, BOLT_BEAM_DAMAGE, "bolt");
+            root(player, victim);
+            addShock(player, victim);
+            noteLongBolt(player, victim);
+            beamHits++;
         }
+        tracker.fire(player, Quest.Goal.SKILL_MULTI, "bolt", beamHits);
         return true;
+    }
+
+    /** Two long shots inside a second is the whole quest, so what is reported is the length of
+     * the current run rather than a total. */
+    private void noteLongBolt(Player shooter, LivingEntity victim) {
+        if (!victim.getWorld().equals(shooter.getWorld())
+                || shooter.getLocation().distance(victim.getLocation()) < BOLT_SNIPE_RANGE) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        Long previous = lastLongBolt.get(shooter.getUniqueId());
+        int run = previous != null && now - previous <= BOLT_SNIPE_WINDOW_MILLIS ? 2 : 1;
+        lastLongBolt.put(shooter.getUniqueId(), now);
+        tracker.fire(shooter, Quest.Goal.BOLT_SNIPER, null, run);
     }
 
     /** Pinned for a fraction of a second. Slowness alone does not stop a player, so the
      * velocity is held at zero for the duration as well. */
-    private void root(LivingEntity victim) {
-        victim.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, ROOT_TICKS, 10));
+    private void root(Player caster, LivingEntity victim) {
+        int ticks = ROOT_TICKS + perk(caster, Perks.BOLT_ROOT);
+        victim.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, ticks, 10));
         new BukkitRunnable() {
-            int left = ROOT_TICKS;
+            int left = ticks;
 
             @Override
             public void run() {
@@ -947,10 +1043,11 @@ public class SkillEffects implements Listener {
 
     // ---------- 감전 ----------
 
-    private void addShock(LivingEntity victim) {
+    private void addShock(Player caster, LivingEntity victim) {
+        int max = SHOCK_MAX_STACKS + perk(caster, Perks.SHOCK_STACKS);
         Shock current = shocks.get(victim.getUniqueId());
         int stacks = current == null || current.expiresAtMillis() <= System.currentTimeMillis()
-                ? 1 : Math.min(SHOCK_MAX_STACKS, current.stacks() + 1);
+                ? 1 : Math.min(max, current.stacks() + 1);
         shocks.put(victim.getUniqueId(), new Shock(stacks, System.currentTimeMillis() + SHOCK_SECONDS * 1000L));
         // Outlined for everyone, so a charged target is worth chasing. The effect times itself
         // out alongside the stack, which saves having to switch the glow back off.
@@ -1002,6 +1099,7 @@ public class SkillEffects implements Listener {
                     return;
                 }
                 target.getWorld().strikeLightning(target.getLocation());
+                tracker.fire(caster, Quest.Goal.ROD_STRIKE, null);
             }
         }.runTaskTimer(plugin, ROD_DELAY_TICKS, ROD_REPEAT_TICKS);
     }
@@ -1029,12 +1127,15 @@ public class SkillEffects implements Listener {
         Entity hit = event.getHitEntity();
         boolean rod = firedBy.equals("lightning_rod");
         if (hit instanceof LivingEntity target && !target.equals(shooter)) {
-            hurt(shooter, target, rod ? ROD_BOLT_DAMAGE : BOLT_DAMAGE);
+            hurt(shooter, target, rod ? ROD_BOLT_DAMAGE : BOLT_DAMAGE, firedBy);
             target.getWorld().spawnParticle(Particle.ELECTRIC_SPARK, target.getLocation().add(0, 1, 0),
                     20, 0.3, 0.4, 0.3, 0.1);
             if (rod) {
-                addShock(target);
+                addShock(shooter, target);
                 callLightning(shooter, target, shockStacks(target));
+            } else {
+                tracker.fire(shooter, Quest.Goal.SKILL_MULTI, "bolt", 1);
+                noteLongBolt(shooter, target);
             }
         }
         if (isPyromancer(shooter)) {
@@ -1055,8 +1156,9 @@ public class SkillEffects implements Listener {
         }
         boolean hunters = isNecromancer(player);
         Location centre = player.getLocation();
-        for (int i = 0; i < PIG_COUNT; i++) {
-            double angle = Math.PI * 2 * i / PIG_COUNT + random.nextDouble() * 0.3;
+        int count = PIG_COUNT + perk(player, Perks.SUMMON_COUNT);
+        for (int i = 0; i < count; i++) {
+            double angle = Math.PI * 2 * i / count + random.nextDouble() * 0.3;
             double speed = PIG_SCATTER_SPEED * (0.8 + random.nextDouble() * 0.4);
             Pig pig = centre.getWorld().spawn(centre, Pig.class);
             pig.getPersistentDataContainer().set(summonedPigKey, PersistentDataType.BOOLEAN, true);
@@ -1090,12 +1192,13 @@ public class SkillEffects implements Listener {
     private boolean wolfPack(Player player) {
         Location centre = player.getLocation();
         List<Wolf> pack = new ArrayList<>();
-        for (int i = 0; i < WOLF_PACK_SIZE; i++) {
+        int count = WOLF_PACK_SIZE + perk(player, Perks.SUMMON_COUNT);
+        for (int i = 0; i < count; i++) {
             Wolf wolf = centre.getWorld().spawn(centre, Wolf.class);
             wolf.setTamed(true);
             wolf.setOwner(player);
             // Thrown outwards like the pigs, so a summon reads as a burst rather than a huddle.
-            double angle = Math.PI * 2 * i / WOLF_PACK_SIZE + random.nextDouble() * 0.3;
+            double angle = Math.PI * 2 * i / count + random.nextDouble() * 0.3;
             double speed = PIG_SCATTER_SPEED * (0.8 + random.nextDouble() * 0.4);
             wolf.setVelocity(new Vector(Math.cos(angle) * speed, PIG_SCATTER_LIFT, Math.sin(angle) * speed));
             summons.add(wolf, player, Summons.Kind.WOLF_PET, Summons.Chase.NONE,
@@ -1108,7 +1211,8 @@ public class SkillEffects implements Listener {
         // Keeping two is group business, not something each wolf can decide for itself.
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             List<Wolf> alive = pack.stream().filter(Wolf::isValid).toList();
-            for (int i = WOLF_PACK_SURVIVORS; i < alive.size(); i++) {
+            int keep = WOLF_PACK_SURVIVORS + perk(player, Perks.WOLF_TAME);
+            for (int i = keep; i < alive.size(); i++) {
                 Wolf leaving = alive.get(i);
                 leaving.getWorld().spawnParticle(Particle.POOF, leaving.getLocation().add(0, 0.5, 0),
                         12, 0.3, 0.3, 0.3, 0.02);
@@ -1140,6 +1244,10 @@ public class SkillEffects implements Listener {
     private void raisePiglin(Player caster, Location at) {
         PigZombie piglin = at.getWorld().spawn(at, PigZombie.class);
         piglin.getEquipment().clear(); // raised bare-handed, not armed from the piglin loot table
+        if (hasPerk(caster, Perks.PIGLIN_SWORD)) {
+            piglin.getEquipment().setItemInMainHand(new ItemStack(Material.GOLDEN_SWORD));
+            piglin.getEquipment().setItemInMainHandDropChance(0f);
+        }
         piglin.setAngry(true);
         piglin.setAdult();
         summons.add(piglin, caster, Summons.Kind.PIGLIN, Summons.Chase.ATTACK,
@@ -1174,7 +1282,26 @@ public class SkillEffects implements Listener {
             if (skill != null) {
                 cooldowns.reduce(player, skill, CORPSE_REFUND_MILLIS);
             }
+            if (hasPerk(player, Perks.NECRO_ZOGLIN) && random.nextDouble() < NECRO_ZOGLIN_CHANCE) {
+                raiseZoglin(player);
+            }
         }
+    }
+
+    /** A baby zoglin at the necromancer's feet. Zoglins go for anything that moves without
+     * being told to, so it is loosed rather than commanded - and it is not a summon, so it will
+     * happily bite its maker too. */
+    private void raiseZoglin(Player caster) {
+        Location at = caster.getLocation();
+        Zoglin zoglin = at.getWorld().spawn(at, Zoglin.class);
+        zoglin.setBaby();
+        zoglin.setPersistent(false);
+        at.getWorld().spawnParticle(Particle.SOUL, at.clone().add(0, 0.5, 0), 15, 0.3, 0.5, 0.3, 0.02);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (zoglin.isValid()) {
+                zoglin.remove();
+            }
+        }, NECRO_SPAWN_TICKS);
     }
 
     // ---------- 드루이드 2 : 흔적 추적 ----------
@@ -1218,6 +1345,14 @@ public class SkillEffects implements Listener {
             if (caster == null || !entry.getValue().add(quarry.getUniqueId())) {
                 continue; // already given away this one
             }
+            tracker.fire(caster, Quest.Goal.TRACK_FIND, null);
+            if (hasPerk(caster, Perks.TRACK_BUFF)) {
+                caster.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, TRACK_BUFF_TICKS, 0));
+                caster.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, TRACK_BUFF_TICKS, 0));
+                summons.boostSpeed(caster, TRACK_BUFF_TICKS, 0);
+                summons.allOf(caster).forEach(mob -> mob.addPotionEffect(
+                        new PotionEffect(PotionEffectType.STRENGTH, TRACK_BUFF_TICKS, 0)));
+            }
             Location at = quarry.getLocation();
             caster.sendMessage(Component.text("[추적] ", NamedTextColor.GREEN)
                     .append(Component.text(quarry.getName() + " — "
@@ -1246,6 +1381,21 @@ public class SkillEffects implements Listener {
             }
             hurt(caster, victim, PIG_BLAST_DAMAGE);
         }
+        if (hasPerk(caster, Perks.NECRO_SILVERFISH) && random.nextDouble() < NECRO_SILVERFISH_CHANCE) {
+            raiseSilverfish(at);
+        }
+    }
+
+    /** Left behind in the crater and hostile to everyone, the summoner included - it is debris,
+     * not a pet, so it is deliberately not registered as a summon. */
+    private void raiseSilverfish(Location at) {
+        Silverfish silverfish = at.getWorld().spawn(at, Silverfish.class);
+        silverfish.setPersistent(false);
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (silverfish.isValid()) {
+                silverfish.remove();
+            }
+        }, NECRO_SPAWN_TICKS);
     }
 
     private boolean isSummonedPig(Entity entity) {
