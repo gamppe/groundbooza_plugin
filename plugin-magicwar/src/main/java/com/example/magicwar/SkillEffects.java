@@ -111,6 +111,10 @@ public class SkillEffects implements Listener {
     private static final int ERUPTION_DELAY_TICKS = 15; // 0.75s between the magma and the lava
     private static final int ERUPTION_HEIGHT = 20;
     private static final int ERUPTION_STEP_TICKS = 2;
+    /** Steps of head start the centre gets over a block one further out. Delaying per block
+     * index instead made the outer ring wait on all twenty-odd blocks ahead of it, which read
+     * as a slow crawl rather than a burst. */
+    private static final double ERUPTION_SPREAD_STEPS_PER_BLOCK = 1.5;
     /** Each lava block is only there for a moment, so the column reads as a spout. */
     private static final int ERUPTION_LAVA_TICKS = 20;
     /** A flat grid of small dots: LAVA particles jump and spit, which made the circle hard to
@@ -711,11 +715,18 @@ public class SkillEffects implements Listener {
         return true;
     }
 
-    /** One task drives every column: each block starts a tick behind the one nearer the centre,
-     * and every column climbs at the same rate. Running a task per column would be dozens of
-     * timers doing the same arithmetic. */
+    /** One task drives every column: a column starts later the further out it sits, and they
+     * all climb at the same rate. Running a task per column would be dozens of timers doing the
+     * same arithmetic. */
     private void erupt(List<Block> area, Location centre) {
         centre.getWorld().playSound(centre, Sound.ENTITY_GENERIC_EXPLODE, 1.2f, 0.5f);
+        // Head start by distance, not by position in the list: every column on the same ring
+        // goes up together.
+        int[] startStep = new int[area.size()];
+        for (int i = 0; i < area.size(); i++) {
+            double distance = Math.sqrt(area.get(i).getLocation().distanceSquared(centre));
+            startStep[i] = (int) Math.round(distance * ERUPTION_SPREAD_STEPS_PER_BLOCK);
+        }
         new BukkitRunnable() {
             int step = 0;
 
@@ -723,7 +734,7 @@ public class SkillEffects implements Listener {
             public void run() {
                 boolean anyLeft = false;
                 for (int i = 0; i < area.size(); i++) {
-                    int height = step - i; // the delay that makes it spread outwards
+                    int height = step - startStep[i];
                     if (height < 0) {
                         anyLeft = true;
                         continue;
