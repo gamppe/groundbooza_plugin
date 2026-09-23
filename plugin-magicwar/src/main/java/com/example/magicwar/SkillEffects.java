@@ -95,6 +95,8 @@ public class SkillEffects implements Listener {
     private static final int ICE_SPIKE_STEP_TICKS = 2;
     /** Blocks either side of the centre line: 1 makes each arm three wide. */
     private static final int ICE_SPIKE_HALF_WIDTH = 1;
+    private static final Material ICE_SPIKE_MARKER = Material.BLUE_STAINED_GLASS;
+    private static final Material ERUPTION_MARKER = Material.MAGMA_BLOCK;
     private static final double ICE_SPIKE_DAMAGE = 8.0;
     private static final int ICE_SPIKE_LINGER_TICKS = 6 * 20;
     /** Half-width of the sheet of ice the cast lays down underfoot: 2 gives 5x5. */
@@ -135,7 +137,7 @@ public class SkillEffects implements Listener {
     private final FrostState frost;
     private final TempBlocks tempBlocks;
     private final SkillItem skillItems;
-    private final EruptionPreview preview;
+    private final SkillPreview preview;
     private final NamespacedKey waveShotKey;
     private final NamespacedKey boltKey;
     private final Random random = new Random();
@@ -146,7 +148,7 @@ public class SkillEffects implements Listener {
 
     public SkillEffects(MagicWarPlugin plugin, ClassManager classes, SkillCooldowns cooldowns,
                         FrostState frost, TempBlocks tempBlocks, SkillItem skillItems,
-                        EruptionPreview preview) {
+                        SkillPreview preview) {
         this.plugin = plugin;
         this.classes = classes;
         this.cooldowns = cooldowns;
@@ -408,7 +410,7 @@ public class SkillEffects implements Listener {
     /** Called every tick from the plugin: watches for a dashing player touching down. */
     public void tick() {
         expireBlinks();
-        tickEruptionPreview();
+        tickPreview();
         Iterator<Map.Entry<UUID, Leap>> it = leaps.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<UUID, Leap> entry = it.next();
@@ -553,8 +555,52 @@ public class SkillEffects implements Listener {
     /** Eight lines of ice crawling outward a block every couple of ticks. Anything standing
      * where a spike appears is hit once - the line remembers who it caught, so a mob frozen in
      * place is not hit again by the same line. */
+    /** Every block an 얼음송곳 cast would cover: the sheet underfoot, then each arm walking
+     * outward exactly as growSpikeLine does. Shared with the marker so the two cannot drift. */
+    private List<Block> spikeFootprint(Location origin) {
+        List<Block> blocks = new ArrayList<>();
+        for (int dx = -ICE_SPIKE_BASE_RADIUS; dx <= ICE_SPIKE_BASE_RADIUS; dx++) {
+            for (int dz = -ICE_SPIKE_BASE_RADIUS; dz <= ICE_SPIKE_BASE_RADIUS; dz++) {
+                Block surface = frost.surfaceAt(origin, origin.getBlockX() + dx, origin.getBlockZ() + dz,
+                        origin.getBlockY());
+                if (surface != null) {
+                    blocks.add(surface);
+                }
+            }
+        }
+        for (int i = 0; i < ICE_SPIKE_DIRECTIONS; i++) {
+            double angle = Math.PI * 2 * i / ICE_SPIKE_DIRECTIONS;
+            double dx = Math.cos(angle);
+            double dz = Math.sin(angle);
+            int lastY = origin.getBlockY();
+            for (int step = 1; step <= ICE_SPIKE_RANGE; step++) {
+                int centreX = origin.getBlockX() + (int) Math.round(dx * step);
+                int centreZ = origin.getBlockZ() + (int) Math.round(dz * step);
+                boolean placedAny = false;
+                for (int off = -ICE_SPIKE_HALF_WIDTH; off <= ICE_SPIKE_HALF_WIDTH; off++) {
+                    int x = centreX + (int) Math.round(-dz * off);
+                    int z = centreZ + (int) Math.round(dx * off);
+                    Block surface = frost.surfaceAt(origin, x, z, lastY);
+                    if (surface == null) {
+                        continue;
+                    }
+                    if (off == 0) {
+                        lastY = surface.getY();
+                    }
+                    placedAny = true;
+                    blocks.add(surface);
+                }
+                if (!placedAny) {
+                    break; // the arm ran off a cliff; so will the cast
+                }
+            }
+        }
+        return blocks;
+    }
+
     private boolean iceSpike(Player player) {
         Location origin = player.getLocation().clone();
+        preview.hide(player.getUniqueId());
         player.getWorld().playSound(origin, Sound.BLOCK_GLASS_BREAK, 1.4f, 0.5f);
         // The lines start a couple of blocks out, so the caster stands on ice of their own.
         for (int dx = -ICE_SPIKE_BASE_RADIUS; dx <= ICE_SPIKE_BASE_RADIUS; dx++) {
@@ -668,36 +714,44 @@ public class SkillEffects implements Listener {
         return area;
     }
 
-    /** Called every tick: shows the caster where the eruption would land, and takes the marker
-     * away the instant it should not be there. */
-    private void tickEruptionPreview() {
+    /** Called every tick: paints the shape whichever held skill would carve, and takes it away
+     * the instant it should not be there. */
+    private void tickPreview() {
         for (Player player : Bukkit.getOnlinePlayers()) {
-            Block target = previewTarget(player);
-            if (target == null) {
+            ClassSkill held = previewableSkill(player);
+            if (held == null) {
                 preview.hide(player.getUniqueId());
                 continue;
             }
-            List<Block> area = eruptionArea(target);
-            if (area.isEmpty()) {
+            Block anchor;
+            List<Block> area;
+            if (held.id().equals("lava_eruption")) {
+                anchor = eruptionTarget(player);
+                area = anchor == null ? List.of() : eruptionArea(anchor);
+            } else {
+                // 얼음송곳 erupts from where the caster stands, so the shape only moves when
+                // they do - aiming around costs nothing.
+                anchor = player.getLocation().getBlock();
+                area = spikeFootprint(player.getLocation());
+            }
+            if (anchor == null || area.isEmpty()) {
                 preview.hide(player.getUniqueId());
                 continue;
             }
-            preview.show(player, target, area);
+            preview.show(player, anchor, area,
+                    held.id().equals("lava_eruption") ? ERUPTION_MARKER : ICE_SPIKE_MARKER);
         }
     }
 
-    /** What this player should be aiming at, or null when the marker has no business showing:
-     * not holding the skill, no longer owns it, still recharging, or aiming at the sky. */
-    private Block previewTarget(Player player) {
+    /** The held skill when it is one that draws a marker and is ready to cast, else null:
+     * not holding one, no longer owning it, or still recharging all mean no marker. */
+    private ClassSkill previewableSkill(Player player) {
         String heldId = skillItems.skillIdOf(player.getInventory().getItemInMainHand());
-        if (!"lava_eruption".equals(heldId)) {
+        if (!"lava_eruption".equals(heldId) && !"ice_spike".equals(heldId)) {
             return null;
         }
         ClassSkill skill = classes.skillById(player.getUniqueId(), heldId);
-        if (skill == null || !cooldowns.ready(player, skill)) {
-            return null;
-        }
-        return eruptionTarget(player);
+        return skill != null && cooldowns.ready(player, skill) ? skill : null;
     }
 
     private boolean lavaEruption(Player player) {

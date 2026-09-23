@@ -21,17 +21,18 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * The 용암분출 targeting marker: a flat magma tile on each block the cast would cover.
+ * The targeting marker a skill paints on the ground while it is held: a flat tile on each block
+ * the cast would cover, in whatever material suits the skill.
  *
  * <p>Particles were the obvious choice and are per-player for free, but their lifetime is set
  * client-side and cannot be shortened - dust in particular hangs around for seconds, so the
- * circle smeared behind the crosshair and lingered after the skill went on cooldown. Display
+ * shape smeared behind the crosshair and lingered after the skill went on cooldown. Display
  * entities can be removed the same tick, which is the whole point of this class.
  *
  * <p>They are entities, so they would be visible to everyone; each tile is hidden from every
  * player but its owner, and from anyone who logs in later.
  */
-public class EruptionPreview implements Listener {
+public class SkillPreview implements Listener {
 
     /** Thin enough to read as paint on the ground rather than a block. */
     private static final Transformation TILE = new Transformation(
@@ -39,25 +40,29 @@ public class EruptionPreview implements Listener {
             new Vector3f(1f, 0.02f, 1f), new AxisAngle4f(0f, 0f, 0f, 1f));
 
     private static final class Preview {
-        Block centre;
+        Block anchor;
+        Material material;
         final List<BlockDisplay> tiles = new ArrayList<>();
     }
 
     private final MagicWarPlugin plugin;
     private final Map<UUID, Preview> previews = new HashMap<>();
 
-    public EruptionPreview(MagicWarPlugin plugin) {
+    public SkillPreview(MagicWarPlugin plugin) {
         this.plugin = plugin;
     }
 
-    /** Draws (or moves) the marker. Does nothing at all while the aim rests on the same block,
-     * which is most ticks - otherwise this would be a few dozen teleports every tick. */
-    public void show(Player player, Block centre, List<Block> area) {
+    /** Draws (or moves) the marker. Does nothing at all while the shape has not moved, which
+     * is most ticks - otherwise this would be a few hundred teleports every tick. */
+    public void show(Player player, Block anchor, List<Block> area, Material material) {
         Preview preview = previews.computeIfAbsent(player.getUniqueId(), id -> new Preview());
-        if (centre.equals(preview.centre) && preview.tiles.size() == area.size()) {
+        if (anchor.equals(preview.anchor) && material == preview.material
+                && preview.tiles.size() == area.size()) {
             return;
         }
-        preview.centre = centre;
+        boolean materialChanged = material != preview.material;
+        preview.anchor = anchor;
+        preview.material = material;
 
         while (preview.tiles.size() > area.size()) {
             preview.tiles.remove(preview.tiles.size() - 1).remove();
@@ -69,13 +74,16 @@ public class EruptionPreview implements Listener {
                 if (tile != null) {
                     tile.remove();
                 }
-                tile = spawnTile(player, at);
+                tile = spawnTile(player, at, material);
                 if (i < preview.tiles.size()) {
                     preview.tiles.set(i, tile);
                 } else {
                     preview.tiles.add(tile);
                 }
                 continue;
+            }
+            if (materialChanged) {
+                tile.setBlock(material.createBlockData());
             }
             tile.teleport(at);
         }
@@ -88,9 +96,9 @@ public class EruptionPreview implements Listener {
         }
     }
 
-    private BlockDisplay spawnTile(Player owner, Location at) {
+    private BlockDisplay spawnTile(Player owner, Location at, Material material) {
         BlockDisplay tile = at.getWorld().spawn(at, BlockDisplay.class, display -> {
-            display.setBlock(Material.MAGMA_BLOCK.createBlockData());
+            display.setBlock(material.createBlockData());
             display.setTransformation(TILE);
             display.setBrightness(new Display.Brightness(15, 15)); // readable in a dark arena
             display.setViewRange(0.5f);

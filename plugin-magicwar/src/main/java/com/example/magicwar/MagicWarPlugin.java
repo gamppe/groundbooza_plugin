@@ -32,9 +32,9 @@ public class MagicWarPlugin extends JavaPlugin {
         this.skillItem = new SkillItem(this);
         this.skillCooldowns = new SkillCooldowns();
         this.tempBlocks = new TempBlocks();
-        EruptionPreview eruptionPreview = new EruptionPreview(this);
+        SkillPreview skillPreview = new SkillPreview(this);
         this.frostState = new FrostState(this, tempBlocks);
-        SkillEffects skillEffects = new SkillEffects(this, classManager, skillCooldowns, frostState, tempBlocks, skillItem, eruptionPreview);
+        SkillEffects skillEffects = new SkillEffects(this, classManager, skillCooldowns, frostState, tempBlocks, skillItem, skillPreview);
         this.arenaManager = new ArenaManager(this, new RoundSettings(config), classManager, questManager, classGuideItem);
         this.classController = new ClassController(this, classManager, questManager, classGuideItem, skillItem);
         arenaManager.setClassController(classController);
@@ -55,7 +55,7 @@ public class MagicWarPlugin extends JavaPlugin {
                 new ClassListener(this, arenaManager, classManager, classGuideItem, skillItem, classController, skillEffects, skillCooldowns), this);
         getServer().getPluginManager().registerEvents(skillEffects, this);
         getServer().getPluginManager().registerEvents(frostState, this);
-        getServer().getPluginManager().registerEvents(eruptionPreview, this);
+        getServer().getPluginManager().registerEvents(skillPreview, this);
         getServer().getScheduler().runTaskTimer(this, frostState::tick, 1L, 1L);
         getServer().getScheduler().runTaskTimer(this, tempBlocks::tick, 1L, 1L);
         getServer().getScheduler().runTaskTimer(this, skillCooldowns::tick, 1L, 1L);
