@@ -235,6 +235,9 @@ public class ArenaManager {
             player.teleport(spawn);
             player.setGameMode(GameMode.SURVIVAL);
             player.setInvulnerable(true);
+            // Everyone starts a round on the same footing: nothing carried over from the lobby
+            // or from a previous match, only what giveKit hands out below.
+            clearEverything(player);
             // Speed and Haste for exactly as long as the peace lasts, to spend the prep time
             // spreading out and gathering rather than walking.
             int graceTicks = settings.graceSeconds * 20;
@@ -390,6 +393,14 @@ public class ArenaManager {
                 }
             }
         }.runTaskTimer(plugin, 1L, 1L));
+    }
+
+    /** Wipes a player back to nothing. PlayerInventory.clear() already covers armour and the
+     * off hand, but a cursor item survives it - that is what an open GUI at the moment of the
+     * teleport would leave behind. */
+    private void clearEverything(Player player) {
+        player.getInventory().clear();
+        player.setItemOnCursor(null);
     }
 
     /** Starting gear, plus the class picker for anyone who has not chosen yet. The picker is
